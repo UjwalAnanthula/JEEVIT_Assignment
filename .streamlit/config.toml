@@ -2,6 +2,7 @@
 [server]
 port = 8501
 address = "localhost"  # the inbox holds private email; do not expose it to the local network
+showEmailPrompt = false  # otherwise the first run waits at an "Email:" prompt and never starts
 
 [browser]
 gatherUsageStats = false
