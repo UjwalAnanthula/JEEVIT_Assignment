@@ -60,7 +60,7 @@ def _comparable(name: str, value: Any) -> Any:
     return value
 
 
-def _describe(name: str, value: Any) -> str:
+def describe_term(name: str, value: Any) -> str:
     if name in ("compensation", "product_value"):
         return format_money(value)
     if name == "deliverables":
@@ -156,8 +156,8 @@ def reconcile(
             else:
                 change = "changed_without_cue"
                 ambiguities.append(
-                    f"{name.replace('_', ' ').capitalize()} changed from '{_describe(name, existing['value'])}' "
-                    f"({existing['source_email_id']}) to '{_describe(name, value)}' ({email.id}) without explicit "
+                    f"{name.replace('_', ' ').capitalize()} changed from '{describe_term(name, existing['value'])}' "
+                    f"({existing['source_email_id']}) to '{describe_term(name, value)}' ({email.id}) without explicit "
                     "revision wording; confirm which is final."
                 )
             event = {"email_id": email.id, "received_at": email.received_at, "value": value, "change_type": change}
@@ -192,5 +192,5 @@ def term_history_summary(terms: ReconciledTerms, name: str) -> str | None:
     parts = []
     for event in term.history:
         label = event.email_id if event.change_type == "stated" else f"{event.email_id}, {event.change_type.replace('_', ' ')}"
-        parts.append(f"{_describe(name, event.value)} ({label})")
+        parts.append(f"{describe_term(name, event.value)} ({label})")
     return " -> ".join(parts)

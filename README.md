@@ -28,11 +28,32 @@ Other commands:
 
 | Command | What it does |
 |---|---|
-| `python -m pytest -q` | 108 offline tests (HTTP is mocked; real network is blocked in tests) |
+| `streamlit run dashboard.py` | Local dashboard at **http://localhost:8501** (see below) |
+| `python -m pytest -q` | 111 offline tests (HTTP is mocked; real network is blocked in tests) |
 | `python -m evaluation.evaluate` | Scores against hand-written answers; writes `output/evaluation.md` |
 | `python -m app.main --no-ai` | Force rules only |
 
 **Outputs** (in `output/`): start with `summary.md` (what needs attention today), then `drafts.md` (reply drafts). `deals.json` and `analyses.json` hold the full structured records, including evidence and term history. `run_info.json` records provenance, timing and token usage.
+
+### Dashboard (optional)
+
+`streamlit run dashboard.py` opens **http://localhost:8501**. It's a read-only view of the same pipeline.
+
+- **Tabs by what to do:** Needs attention, Decline, Scam warnings, Ignored, plus All emails.
+- **One card per deal**, showing:
+  - the next step and category;
+  - the latest terms in one line (fee, content, dates, usage);
+  - the main risks, with severity;
+  - the to-dos.
+- **Folded on each card:** the **suggested reply** (copyable; nothing is sent) and the **details** (where each term came from, how the terms changed, why the emails were grouped).
+- **All emails:** the classified inbox. Open any email to read it and see what was extracted.
+
+The sidebar switches between rules only and AI (Groq → Gemini → rules) when keys are configured. AI answers are cached, so the first AI run is the slow one.
+
+The dashboard:
+- shows email text as plain text, so links in phishing emails are never clickable;
+- listens on localhost only;
+- sends no usage statistics to Streamlit.
 
 ## What the creator sees (excerpt from `summary.md`)
 
@@ -175,8 +196,9 @@ These are the improvements I would make next, in priority order. They are sugges
 - A queue with a paced worker for 1,000+ emails/day, plus alerts on fallback rate, validation errors and spend.
 - Package it as a Docker image for deployment, with a `.dockerignore` so `.env` and API keys never end up inside the image.
 
-**3. A review screen the creator would trust**
-- One screen per deal: latest terms, term history, risks with evidence, and an editable draft with "mark as sent".
+**3. Turn the read-only dashboard into a review screen**
+- Let the creator edit a draft, mark it as sent, and correct a category or term directly in the dashboard.
+- Add login, so the dashboard can be hosted for a creator instead of only running on localhost.
 - Store the creator's edits and overrides as new labels for evaluation.
 
 **4. Better extraction and safety**
@@ -199,6 +221,7 @@ These are the improvements I would make next, in priority order. They are sugges
   - grouping, reconciliation and policy checks;
   - draft replies;
   - the evaluation harness;
+  - the Streamlit dashboard;
   - tests and this README draft.
 - It ran the test suite, the pipeline and the evaluation after each change.
 - The model choice was checked against Groq's live documentation.
@@ -208,6 +231,8 @@ All numbers in this README come from commands run in this repository, and first-
 ## Project layout
 
 ```
+dashboard.py             Streamlit dashboard (localhost:8501), read-only
+.streamlit/config.toml   dashboard settings: localhost only, no usage statistics
 app/
   main.py                CLI (--no-ai, --check-ai)
   pipeline.py            orchestration; writes all outputs
@@ -223,5 +248,5 @@ app/
     reply_generator.py   draft replies (never sent)
   utils/helpers.py       money (lakh/k), dates, domains, sentences
 evaluation/              expected answers for the 15 emails, evaluate.py
-tests/                   108 offline tests
+tests/                   111 offline tests (including a headless render of the dashboard)
 ```

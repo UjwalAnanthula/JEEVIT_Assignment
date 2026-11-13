@@ -1,0 +1,7 @@
+# Streamlit settings for the local dashboard: localhost only on port 8501, no usage statistics sent.
+[server]
+port = 8501
+address = "localhost"  # the inbox holds private email; do not expose it to the local network
+
+[browser]
+gatherUsageStats = false
