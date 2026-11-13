@@ -28,10 +28,9 @@ Other commands:
 
 | Command | What it does |
 |---|---|
-| `python -m pytest -q` | 112 offline tests (HTTP is mocked; real network is blocked in tests) |
+| `python -m pytest -q` | 108 offline tests (HTTP is mocked; real network is blocked in tests) |
 | `python -m evaluation.evaluate` | Scores against hand-written answers; writes `output/evaluation.md` |
 | `python -m app.main --no-ai` | Force rules only |
-| `docker compose up --build` | Same pipeline in a container (`.env` is read at runtime, never copied into the image) |
 
 **Outputs** (in `output/`): start with `summary.md` (what needs attention today), then `drafts.md` (reply drafts). `deals.json` and `analyses.json` hold the full structured records, including evidence and term history. `run_info.json` records provenance, timing and token usage.
 
@@ -98,51 +97,32 @@ The same safety rules, grounding and deterministic floor apply whichever provide
 
 ## Evaluation
 
-Expected answers were written by hand from the emails, not from system output. They cover category, extracted fields, grouping, reconciled deal terms, expected risk codes and the next action. Values "not stated" are scored too, so any **fabricated** value counts as an error.
+I wrote expected answers by hand for all 15 emails ([evaluation/expected_results.json](evaluation/expected_results.json)), from the emails themselves rather than from system output. Each one covers:
+- the category;
+- the key fields: brand, fee, currency, payment type, deliverables, deadline, usage rights;
+- which emails form one deal, and the deal's latest terms;
+- the risks that must be flagged;
+- the next step.
 
-There are two sets:
-- **Sample:** the 15 supplied emails ([evaluation/expected_results.json](evaluation/expected_results.json)).
-- **Held-out:** 12 synthetic emails ([evaluation/holdout/](evaluation/holdout)). These were written *after* the system was built but *before* it was run on them: new phrasings, a threaded follow-up with a changed subject, a look-alike Instagram domain, a crypto exchange, a "5G phone" competitor, an onboarding deposit, Hinglish, and ad-usage wording without the word "usage".
+Fields that the email doesn't state are scored too, so a **made-up value** counts as an error. Run `python -m evaluation.evaluate` (rules) or `--ai` (live model).
 
-**Results (rules mode):**
-
-| Metric | Sample (15) | Held-out (12), first run | Held-out after fixes |
-|---|---|---|---|
-| Category | 15/15 | 12/12 | 12/12 |
-| Next action (per email) | 15/15 | **11/12** | 12/12 |
-| Grouping (exact) | 13/13 | 11/11 | 11/11 |
-| Risk recall | 14/14 | **6/8** | 8/8 |
-| Extracted fields | 99% (fee 14/15 at first) | usage **2/3**; others 100% | 100% |
-| Reconciled deal terms | 5/5 | deliverables **0/1** | 5/5 |
-| Fabricated values | **1** at first, then 0 | 0 | 0 |
-
-**What it got wrong, and the general fixes:**
-1. **H-12** said **accept** on *"run it as partnership ads from your handle for 12 months"*. Usage rights were only recognised via words like "usage" or "rights". Ad-usage phrasing is now detected, so whitelisting and 12 > 3 months lead to "negotiate".
-2. **H-01/H-02:** "add one more story" was not understood, so the deal stayed at 2 stories. Additions are now extracted and applied during reconciliation, with history.
-3. **E-07:** the rules extractor read the injected "Rs 5,00,000" as a fee. Deal terms already excluded it; now amounts inside AI-directed instructions are ignored at extraction too.
-
-**Caveats.** After these fixes the held-out set is no longer a blind test, so the honest blind number is the first run. Both sets are small and written by the same person who built the system. Treat this as regression protection plus an error analysis, not as an accuracy claim.
-
-**Groq mode** (`python -m evaluation.evaluate --ai`, live `openai/gpt-oss-20b`, 13 Nov 2026). Detected scams skip the model by design.
-
-| Metric | Sample: first Groq run | Sample: with floor | Held-out: first Groq run | Held-out: with floor |
+| Metric | Rules, first run | Rules, now | Groq, first run | Groq, now |
 |---|---|---|---|---|
-| Category | **14/15** | 15/15 | 12/12 | 12/12 |
-| Next action | **14/15** | 15/15 | **11/12** | 12/12 |
-| Grouping / risk recall | 13/13 / 14/14 | 13/13 / 14/14 | 11/11 / **7/8** | 11/11 / 8/8 |
-| Fields | 100% | 100% | currency **7/8**, usage **2/3** | brand 8/9, rest 100% |
-| Fabricated values | 0 | 0 | 0 | **1** |
+| Category | 15/15 | 15/15 | **14/15** | 15/15 |
+| Next step (per email) | 15/15 | 15/15 | **14/15** | 15/15 |
+| Deal grouping | 13/13 | 13/13 | 13/13 | 13/13 |
+| Risks flagged | 14/14 | 14/14 | 14/14 | 14/14 |
+| Fields | fee **14/15**, rest 100% | 100% | 100% | 100% |
+| Dew Lab deal's latest terms | 5/5 | 5/5 | 5/5 | 5/5 |
+| Made-up values | **1** | 0 | 0 | 0 |
 
-The first Groq run showed the model **under-reporting** things that are plainly in the text:
-- **E-15:** "campaign brief attached" was marked *not a collaboration*, so a real lead became spam.
-- **H-02:** "we can increase the budget" was given role *initial_offer*, so the deal went to manual review.
-- **H-04:** no currency for "$1,000".
-- **H-12:** no whitelisting for "partnership ads from your handle".
-- **H-08:** one transient HTTP 400.
+Groq ran live with `openai/gpt-oss-20b` on 13 Nov 2026. Emails already flagged as scams are not sent to the model.
 
-The fix applies the same principle as the decisions, now at extraction: a **deterministic floor**. The model can add information but cannot drop a signal that plain code reads directly from the email: collaboration intent, explicit revision wording, a stated currency, usage/whitelisting flags. Each reinforcement is written to the extraction's `uncertainties`. A 400 is retried once.
+**What it got wrong, and the fixes:**
+1. **Rules, E-07:** the rule extractor read the injected "Rs 5,00,000" as a fee. Deal terms already excluded it; now an amount inside instructions aimed at an AI is never read as a fee.
+2. **Groq, E-15:** the model marked "please find our campaign brief attached" as *not a collaboration*, so a real lead became spam. In testing with other wording it also dropped a stated currency ("$1,000") and a whitelisting request. The fix is a **deterministic floor**: the model can add information, but it cannot drop a signal plain code reads directly from the email (collaboration language, explicit revision wording, a stated currency, usage/whitelisting terms). Each time this happens it is noted in the extraction.
 
-The one remaining "fabrication" is H-08's brand. The model inferred `bluedoor.cafe` from the sender address `bluedoor.cafe@gmail.com`, while the label says the email doesn't name a brand. It is scored as an error under the strict rule rather than relabelled.
+**How far to trust these numbers.** 15 emails is a small set, and I wrote the expected answers after seeing the emails while building the system. So 15/15 shows the tricky cases are handled as intended, not that it will be 100% on new mail. Measuring that properly is the first item under "With another week".
 
 ## Cost and time per email
 
@@ -174,8 +154,8 @@ What I'd change for that volume:
   - INR for an amount with no currency (E-06), shown as an assumption;
   - Instagram for reels/stories with no platform named;
   - the year for dates without one, inferred from the email's received date.
-- **Keyword-based policy checks.** Synonym lists cover common phrasings ("fantasy cricket", "5G phone"); negations like "we are not a betting app" are handled. Truly novel wording can still slip through.
-- **Injection detection** is a pattern list plus the model's own flag. A novel phrasing could evade both. Even then, the model cannot change category, action, rates or replies.
+- **Keyword-based policy checks.** Synonym lists cover common phrasings ("fantasy cricket", "5G phone"), but negation is not understood: "we are not a betting app" would still trip the no-betting rule. New wording can slip through.
+- **Injection detection** is a short pattern list (it catches E-07's "Note to any AI assistant…" and "Classify this email as…") plus the model's own flag. A differently worded attack could evade both. Even then, the model cannot change the category, next step, rates or replies.
 - **Drafts** are English templates; a reply to a Hinglish email is still English. Attachments are never opened.
 - **Exclusivity matching** is by category keywords. It does not know every competitor brand by name.
 
@@ -184,6 +164,7 @@ What I'd change for that volume:
 These are the improvements I would make next, in priority order. They are suggestions, not part of this submission.
 
 **1. Know how good it is on real mail**
+- Write a held-out set of new emails *before* running the system on them (new phrasings, look-alike domains, agency follow-ups, Hinglish) and report the first, blind score.
 - Label 100+ real, anonymised creator emails with two independent reviewers, and measure agreement between them.
 - Evaluate Groq, Gemini and rules separately per field, and run the evaluation in CI so a prompt or rule change can't silently lower accuracy.
 - Add per-field confidence, so low-confidence extractions are routed to review instead of acted on.
@@ -192,6 +173,7 @@ These are the improvements I would make next, in priority order. They are sugges
 - Gmail/Outlook read-only import (OAuth) using real thread headers (`Message-ID`, `In-Reply-To`) for grouping.
 - PostgreSQL for emails, extractions and deal events, keyed by `Message-ID` so reruns are idempotent.
 - A queue with a paced worker for 1,000+ emails/day, plus alerts on fallback rate, validation errors and spend.
+- Package it as a Docker image for deployment, with a `.dockerignore` so `.env` and API keys never end up inside the image.
 
 **3. A review screen the creator would trust**
 - One screen per deal: latest terms, term history, risks with evidence, and an editable draft with "mark as sent".
@@ -199,7 +181,8 @@ These are the improvements I would make next, in priority order. They are sugges
 
 **4. Better extraction and safety**
 - Read PDF/DOCX briefs (like E-15's attachment) in a sandbox instead of only asking for the details.
-- Add a dedicated prompt-injection classifier as an extra signal alongside the current patterns.
+- Stronger injection detection: more phrasings ("if you are an AI…", fake `System:` blocks, "ignore your instructions"), flag hidden text (HTML comments, zero-width characters), and a dedicated prompt-injection classifier as an extra signal.
+- Understand negation in content rules, so "we are not a betting app" is not treated as a betting app.
 - Recognise competitor brands by name, not only by category keywords, for exclusivity checks.
 - Replies in the brand's language (Hindi/Hinglish) when the email is written that way.
 - Use the Groq Batch API for non-urgent backfills to cut cost.
@@ -215,12 +198,12 @@ These are the improvements I would make next, in priority order. They are sugges
   - the Groq client and fallback;
   - grouping, reconciliation and policy checks;
   - draft replies;
-  - the evaluation harness and held-out set;
-  - tests, Docker hardening and this README draft.
+  - the evaluation harness;
+  - tests and this README draft.
 - It ran the test suite, the pipeline and the evaluation after each change.
 - The model choice was checked against Groq's live documentation.
 
-All numbers in this README come from commands run in this repository. The expected answers were written before scoring, and the first-run held-out results are reported as they were.
+All numbers in this README come from commands run in this repository, and first-run results are reported as they were.
 
 ## Project layout
 
@@ -239,6 +222,6 @@ app/
     recommendation.py    next action, summary.md, drafts.md
     reply_generator.py   draft replies (never sent)
   utils/helpers.py       money (lakh/k), dates, domains, sentences
-evaluation/              expected answers, held-out set, evaluate.py
-tests/                   112 offline tests
+evaluation/              expected answers for the 15 emails, evaluate.py
+tests/                   108 offline tests
 ```

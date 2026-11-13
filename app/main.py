@@ -62,6 +62,9 @@ def main() -> None:
     print(f"Processed {len(analyses)} emails into {len(deals)} deal groups in {info['total_seconds']}s.")
     print(f"Extraction: {sources}" + (f" (fallback: {info['fallback_reasons']})" if info["fallback_reasons"] else ""))
     for name, calls in info["ai_calls"].items():
+        if not calls:
+            print(f"{name}: no API calls (answers came from the local cache, or it was not needed)")
+            continue
         print(f"{name}: {calls} calls, tokens {info['ai_tokens'].get(name, {})}, "
               f"avg latency {info['ai_avg_latency_seconds'].get(name)}s")
     print(f"Reference date: {info['reference_date']} ({info['reference_date_source']})")

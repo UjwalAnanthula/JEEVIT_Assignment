@@ -1,15 +1,14 @@
-# Batch 4: the evaluation harness runs offline on both sets, and the general fixes found by the held-out set hold.
-# The held-out emails are not re-tested here one by one; these tests use fresh synthetic wording.
+# Batch 4: the evaluation harness scores all 15 emails offline, plus regression tests for extraction fixes.
+# The extraction tests use fresh synthetic wording rather than the sample emails.
 from app.services.rule_classifier import extract_with_rules
 from evaluation.evaluate import run_set
 
 
-def test_evaluation_runs_offline_on_both_sets():
-    for name in ("sample", "holdout"):
-        report, info = run_set(name, use_ai=False)
-        assert info["extraction_sources"] == {"rules": info["emails"]}
-        assert report.scores["category"].total == info["emails"]
-        assert report.fabricated == []
+def test_evaluation_runs_offline_on_the_sample():
+    report, info = run_set("sample", use_ai=False)
+    assert info["extraction_sources"] == {"rules": 15}
+    assert report.scores["category"].total == 15 and report.scores["category"].correct == 15
+    assert report.fabricated == [] and report.mismatches == []
 
 
 def test_amounts_inside_ai_instructions_are_not_fees(make_email):

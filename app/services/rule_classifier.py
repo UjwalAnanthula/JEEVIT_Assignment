@@ -464,20 +464,9 @@ _INJECTION_RE = re.compile(
     r"|\bdisregard (?:your|the|all|any) (?:rules|instructions|guidelines|policies)\b"
     r"|\bclassify this (?:email|message)\b|\b(?:system|developer) prompt\b"
     r"|\byou are (?:now )?(?:an?|the) (?:ai|assistant|language model)\b"
-    r"|\breveal (?:your|the) (?:prompt|instructions|api key|system)\b"
-    # Broader phrasings: conditional addressing, overrides, fake role blocks, verdict steering.
-    r"|\bif you(?:'re| are) (?:an? )?(?:ai|assistant|bot|language model|llm|chatbot)\b"
-    r"|\b(?:override|bypass|forget|ignore|disregard)\s+(?:all\s+|any\s+)?(?:of\s+)?"
-    r"(?:your\s+|the\s+|previous\s+|prior\s+|above\s+|earlier\s+|system\s+)*"
-    r"(?:instructions|prompts?|guardrails|safety (?:rules|filters)|content filters)\b"
-    r"|(?:^|\n)\s*(?:\[|<|###\s*)(?:system|assistant|developer)\s*(?:\]|>|:)"
-    r"|(?:^|\n)\s*system\s*:"
-    r"|\bmark (?:this|the) (?:email|message|sender) as (?:safe|legit\w*|verified|trusted)\b"
-    r"|\b(?:pretend|act) (?:to be|as|you are) (?:an? |the )?(?:admin|administrator|system|developer)\b"
-    r"|\b(?:deal_offer|needs_more_info|not_a_fit|scam_or_phishing)\b",
+    r"|\breveal (?:your|the) (?:prompt|instructions|api key|system)\b",
     re.I,
 )
-_HIDDEN_CONTENT_RE = re.compile(r"<!--.*?-->|[​-‏⁠﻿]", re.S)
 _PERSONAL_DATA_STRONG_RE = re.compile(
     r"\b(?:home|residential|personal) address\b|\bpersonal (?:phone|mobile|number|email)\b"
     r"|\b(?:otp|one[- ]time password|upi pin|cvv|password|aadh?aa?r)\b",
@@ -544,11 +533,6 @@ def detect_security_signals(email: EmailRecord) -> list[SecuritySignal]:
         signals.append(_signal("financial_data_request", "weak",
                                "Requests bank or PAN details; share only after a contract is verified.",
                                text, _PERSONAL_DATA_WEAK_RE))
-    if _HIDDEN_CONTENT_RE.search(text):
-        signals.append(SecuritySignal(
-            code="hidden_content", strength="weak",
-            explanation="Contains hidden text (HTML comments or zero-width characters), a common way to smuggle instructions.",
-            evidence="Hidden characters or comment found in the email body."))
     if _URGENCY_RE.search(text):
         signals.append(_signal("urgency_pressure", "weak", "Uses urgency or a short expiry to pressure a decision.",
                                text, _URGENCY_RE))

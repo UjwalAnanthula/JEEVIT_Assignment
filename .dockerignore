@@ -1,9 +1,0 @@
-# Keeps secrets, local environments, caches and generated output out of the Docker build context.
-.env
-.git
-.venv
-.cache
-.pytest_cache
-**/__pycache__
-output/*
-!output/.gitkeep

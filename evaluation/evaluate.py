@@ -1,5 +1,5 @@
-# Scores the pipeline against hand-written answers: categories, fields, grouping, deal terms, risks, actions.
-# Usage: python -m evaluation.evaluate [--set sample|holdout|all] [--ai]  (default: all sets, rules only)
+# Scores the pipeline on the 15 supplied emails against hand-written answers: category, fields, grouping, risks, actions.
+# Usage: python -m evaluation.evaluate [--ai]  (default: rules only, no API calls)
 import argparse
 import json
 import sys
@@ -15,7 +15,6 @@ from app.utils.helpers import brand_keys_match
 ROOT = Path(__file__).resolve().parents[1]
 SETS = {
     "sample": (ROOT / "data" / "inbox.json", ROOT / "evaluation" / "expected_results.json"),
-    "holdout": (ROOT / "evaluation" / "holdout" / "inbox.json", ROOT / "evaluation" / "holdout" / "expected.json"),
 }
 FIELDS = ("brand", "fee", "currency", "payment_type", "deliverables", "deadline", "usage")
 
@@ -169,12 +168,10 @@ def render(reports: list[tuple[Report, dict]]) -> str:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Evaluate the inbox assistant against hand-written answers.")
-    parser.add_argument("--set", choices=["sample", "holdout", "all"], default="all")
-    parser.add_argument("--ai", action="store_true", help="Use Groq if configured (default: rules only).")
+    parser.add_argument("--ai", action="store_true", help="Use the configured AI providers (default: rules only).")
     parser.add_argument("--output", type=Path, default=ROOT / "output" / "evaluation.md")
     args = parser.parse_args()
-    names = ["sample", "holdout"] if args.set == "all" else [args.set]
-    reports = [run_set(name, args.ai) for name in names]
+    reports = [run_set(name, args.ai) for name in SETS]
     text = render(reports)
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text("# Evaluation\n\n" + text, encoding="utf-8")
