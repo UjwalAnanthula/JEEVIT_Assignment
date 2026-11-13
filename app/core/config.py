@@ -20,6 +20,10 @@ class Settings(BaseSettings):
     groq_base_url: str = "https://api.groq.com/openai/v1"
     # auto = strict json_schema for models that support it (gpt-oss), json_object otherwise.
     groq_response_format: Literal["auto", "json_schema", "json_object"] = "auto"
+    # Fallback provider, tried only when Groq fails for an email (OpenAI-compatible endpoint).
+    gemini_api_key: SecretStr = SecretStr("")
+    gemini_model: str = "gemini-3.5-flash-lite"
+    gemini_base_url: str = "https://generativelanguage.googleapis.com/v1beta/openai"
     ai_enabled: bool = True
     ai_check_model: bool = True  # verify the model exists via /models before the first call
     ai_skip_threats: bool = True  # emails already flagged as scams by plain code are not sent to the model
@@ -44,6 +48,10 @@ class Settings(BaseSettings):
     @property
     def has_api_key(self) -> bool:
         return bool(self.groq_api_key.get_secret_value().strip())
+
+    @property
+    def has_gemini_key(self) -> bool:
+        return bool(self.gemini_api_key.get_secret_value().strip())
 
     @property
     def is_gpt_oss(self) -> bool:

@@ -45,7 +45,7 @@ def test_provenance_and_outputs(tmp_path):
     info = json.loads((tmp_path / "run_info.json").read_text(encoding="utf-8"))
     assert {a["extraction"]["source"] for a in analyses} == {"rules"}
     assert all(a["extraction"]["fallback_reason"] == "ai_disabled" for a in analyses)
-    assert info["extraction_sources"] == {"rules": 15} and info["groq_http_calls"] == 0
+    assert info["extraction_sources"] == {"rules": 15} and info["ai_calls"] == {} and info["ai_providers"] == []
     assert info["reference_date"] == "2026-11-12"
     summary = (tmp_path / "summary.md").read_text(encoding="utf-8")
     assert "Needs your attention today" in summary and "Security warnings" in summary
@@ -63,3 +63,38 @@ def test_classify_compat_wrapper(inbox, profile):
     from app.services.rule_classifier import classify
 
     assert classify(inbox["E-14"], profile).category == "scam_or_phishing"
+
+
+def test_check_ai_reports_each_provider(monkeypatch, capsys, offline):
+    import httpx
+    from pydantic import SecretStr
+
+    import app.main as cli
+    from app.core import config
+    from app.services.ai_extractor import EmailExtractor
+
+    from tests.test_ai_extractor import DEW_LAB_LLM, completion
+
+    def route(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "openai/gpt-oss-20b"}]})
+        if request.url.host == "generativelanguage.googleapis.com":
+            return httpx.Response(401)
+        return completion(DEW_LAB_LLM)
+
+    keyed = offline.model_copy(update={"ai_enabled": True, "groq_api_key": SecretStr("g"),
+                                       "gemini_api_key": SecretStr("m")})
+    monkeypatch.setattr(config, "settings", keyed)
+    client = httpx.Client(transport=httpx.MockTransport(route))
+    monkeypatch.setattr(cli, "EmailExtractor", lambda s: EmailExtractor(s, http_client=client))
+    assert cli.check_ai(ROOT / "data") == 0  # at least one provider works
+    out = capsys.readouterr().out
+    assert "groq (openai/gpt-oss-20b, json_schema): OK on E-01" in out
+    assert "gemini (gemini-3.5-flash-lite, json_schema): FAILED" in out
+
+
+def test_check_ai_without_keys(capsys):
+    import app.main as cli
+
+    assert cli.check_ai(ROOT / "data") == 1
+    assert "No AI provider configured" in capsys.readouterr().out

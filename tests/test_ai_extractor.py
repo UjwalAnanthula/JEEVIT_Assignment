@@ -429,3 +429,71 @@ def test_transient_bad_request_is_retried_once(inbox, tmp_path):
                                 ai_max_retries=3)[0]
     assert always_bad.extract(inbox["E-01"]).fallback_reason == "http_400"
     assert always_bad.client.calls == 2  # one retry, not four
+
+
+# ---------------------------------------------------------------- Groq -> Gemini -> rules fallback chain
+def chain_extractor(groq_handler, gemini_handler, tmp_path, **overrides):
+    def route(request: httpx.Request) -> httpx.Response:
+        if request.url.host == "generativelanguage.googleapis.com":
+            return gemini_handler(request)
+        return groq_handler(request)
+
+    return make_extractor(route, tmp_path, gemini_api_key="gem-key-456", **overrides)
+
+
+def test_gemini_answers_when_groq_fails(inbox, tmp_path):
+    seen = []
+
+    def gemini(request):
+        seen.append(request)
+        return completion(DEW_LAB_LLM)
+
+    extractor, _ = chain_extractor(lambda r: httpx.Response(503), gemini, tmp_path)
+    x = extractor.extract(inbox["E-01"])
+    assert x.source == "gemini" and x.model == "gemini-3.5-flash-lite"
+    assert x.fallback_reason == "groq:http_503" and x.compensation.amount == 120000
+    payload = json.loads(seen[0].content)
+    assert seen[0].headers["authorization"] == "Bearer gem-key-456"
+    assert str(seen[0].url) == "https://generativelanguage.googleapis.com/v1beta/openai/chat/completions"
+    assert payload["model"] == "gemini-3.5-flash-lite" and payload["max_tokens"] == 2048
+    assert payload["response_format"]["type"] == "json_schema" and "include_reasoning" not in payload
+
+
+def test_gemini_not_called_when_groq_works(inbox, tmp_path):
+    def gemini(request):
+        raise AssertionError("Gemini must not be called when Groq succeeds")
+
+    extractor, _ = chain_extractor(lambda r: completion(DEW_LAB_LLM), gemini, tmp_path)
+    x = extractor.extract(inbox["E-01"])
+    assert x.source == "groq" and x.fallback_reason is None
+
+
+def test_rules_when_every_provider_fails(inbox, tmp_path):
+    extractor, _ = chain_extractor(lambda r: httpx.Response(500), lambda r: completion("not json"), tmp_path)
+    x = extractor.extract(inbox["E-01"])
+    assert x.source == "rules" and x.fallback_reason == "groq:http_500; gemini:invalid_json"
+
+
+def test_disabled_groq_is_skipped_for_later_emails(inbox, tmp_path):
+    groq_calls = []
+
+    def groq(request):
+        groq_calls.append(1)
+        return httpx.Response(401)
+
+    extractor, _ = chain_extractor(groq, lambda r: completion(DEW_LAB_LLM), tmp_path)
+    assert [extractor.extract(inbox[i]).source for i in ("E-01", "E-02", "E-04")] == ["gemini"] * 3
+    assert len(groq_calls) == 1
+
+
+def test_gemini_only_and_prefixed_model_ids(inbox, tmp_path):
+    def gemini(request):
+        if request.url.path.endswith("/models"):
+            return httpx.Response(200, json={"data": [{"id": "models/gemini-3.5-flash-lite"}]})
+        return completion(DEW_LAB_LLM)
+
+    extractor, _ = chain_extractor(lambda r: httpx.Response(500), gemini, tmp_path,
+                                   groq_api_key="", ai_check_model=True)
+    assert [c.provider.name for c in extractor.clients] == ["gemini"]
+    x = extractor.extract(inbox["E-01"])
+    assert x.source == "gemini" and x.fallback_reason is None

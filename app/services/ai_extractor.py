@@ -8,11 +8,21 @@ import re
 import time
 from collections import Counter
 from collections.abc import Callable
+from dataclasses import dataclass
 from pathlib import Path
 from typing import Annotated, Any
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field, StringConstraints, ValidationError, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    ConfigDict,
+    Field,
+    SecretStr,
+    StringConstraints,
+    ValidationError,
+    field_validator,
+    model_validator,
+)
 
 from app.core.config import Settings
 from app.models.schemas import (
@@ -242,9 +252,36 @@ def _error_code(response: httpx.Response) -> str:
         return ""
 
 
-class GroqClient:
-    """Minimal OpenAI-compatible Groq client: retries 429/5xx/timeouts, paces itself on rate-limit
-    headers, records token usage, and never retries auth or missing-model errors."""
+@dataclass(frozen=True)
+class Provider:
+    """One OpenAI-compatible chat endpoint. Providers are tried in order for each email."""
+
+    name: str
+    model: str
+    base_url: str
+    api_key: SecretStr
+    response_format: str  # "json_schema" or "json_object"
+    max_tokens_param: str
+    extra: tuple[tuple[str, Any], ...] = ()
+
+
+def providers_from_settings(settings: Settings) -> list[Provider]:
+    """Groq first (primary), Gemini second (fallback); a provider without a key is skipped."""
+    providers = []
+    if settings.has_api_key:
+        extra = (("reasoning_effort", settings.ai_reasoning_effort), ("include_reasoning", False)) \
+            if settings.is_gpt_oss else ()
+        providers.append(Provider("groq", settings.groq_model, settings.groq_base_url, settings.groq_api_key,
+                                  settings.response_format_mode, "max_completion_tokens", extra))
+    if settings.has_gemini_key:
+        providers.append(Provider("gemini", settings.gemini_model, settings.gemini_base_url, settings.gemini_api_key,
+                                  "json_schema", "max_tokens", (("reasoning_effort", settings.ai_reasoning_effort),)))
+    return providers
+
+
+class ChatClient:
+    """Minimal OpenAI-compatible client (Groq, Gemini): retries 429/5xx/timeouts, paces itself on
+    rate-limit headers when present, records token usage, never retries auth or missing-model errors."""
 
     def __init__(
         self,
@@ -252,7 +289,9 @@ class GroqClient:
         http_client: httpx.Client | None = None,
         sleep: Callable[[float], None] = time.sleep,
         clock: Callable[[], float] = time.monotonic,
+        provider: Provider | None = None,
     ) -> None:
+        self.provider = provider or providers_from_settings(settings)[0]
         self._settings = settings
         self._client = http_client or httpx.Client(timeout=settings.ai_timeout_seconds)
         self._sleep = sleep
@@ -266,10 +305,10 @@ class GroqClient:
         self.latencies: list[float] = []
 
     def _url(self, path: str) -> str:
-        return self._settings.groq_base_url.rstrip("/") + path
+        return self.provider.base_url.rstrip("/") + path
 
     def _headers(self) -> dict[str, str]:
-        return {"Authorization": f"Bearer {self._settings.groq_api_key.get_secret_value()}"}
+        return {"Authorization": f"Bearer {self.provider.api_key.get_secret_value()}"}
 
     def list_models(self) -> set[str]:
         try:
@@ -284,28 +323,27 @@ class GroqClient:
         if response.status_code != 200:
             raise AIExtractionError(f"http_{response.status_code}")
         try:
-            return {item["id"] for item in response.json()["data"]}
+            # Gemini may list ids as "models/<id>"; compare on the bare id.
+            return {str(item["id"]).removeprefix("models/") for item in response.json()["data"]}
         except (ValueError, KeyError, TypeError) as exc:
             raise AIExtractionError("invalid_response", type(exc).__name__) from exc
 
     def payload(self, messages: list[dict[str, str]]) -> dict[str, Any]:
-        s = self._settings
+        p = self.provider
         body: dict[str, Any] = {
-            "model": s.groq_model,
+            "model": p.model,
             "messages": messages,
-            "temperature": s.ai_temperature,
-            "max_completion_tokens": s.ai_max_completion_tokens,
+            "temperature": self._settings.ai_temperature,
+            p.max_tokens_param: self._settings.ai_max_completion_tokens,
         }
-        if s.response_format_mode == "json_schema":
+        if p.response_format == "json_schema":
             body["response_format"] = {
                 "type": "json_schema",
                 "json_schema": {"name": "brand_email_extraction", "strict": True, "schema": strict_json_schema()},
             }
         else:
             body["response_format"] = {"type": "json_object"}
-        if s.is_gpt_oss:
-            body["reasoning_effort"] = s.ai_reasoning_effort
-            body["include_reasoning"] = False
+        body.update(dict(p.extra))
         return body
 
     def _pace(self) -> None:
@@ -316,7 +354,7 @@ class GroqClient:
         if self._remaining_tokens < self._next_estimate:
             wait = self._tokens_reset_at - self._clock()
             if wait > 0:
-                logger.info("Pacing Groq calls for %.1fs to stay under the tokens-per-minute limit.", wait)
+                logger.info("Pacing %s calls for %.1fs to stay under the tokens-per-minute limit.", self.provider.name, wait)
                 self._sleep(min(wait, self._settings.ai_max_backoff_seconds))
 
     def _record_limits(self, response: httpx.Response) -> None:
@@ -358,7 +396,7 @@ class GroqClient:
                 if response.status_code in (401, 403):
                     raise AIExtractionError("auth_error", f"HTTP {response.status_code}")
                 if response.status_code == 404 or _error_code(response) == "model_not_found":
-                    raise AIExtractionError("model_unavailable", self._settings.groq_model)
+                    raise AIExtractionError("model_unavailable", self.provider.model)
                 if response.status_code == 400 and not retried_bad_request:
                     # Strict-schema generation occasionally fails transiently (seen live); one retry is cheap.
                     retried_bad_request = True
@@ -410,7 +448,7 @@ def parse_llm_content(content: str) -> LLMExtraction:
 
 
 # ---------------------------------------------------------------- grounding and conversion
-def to_extraction(llm: LLMExtraction, email: EmailRecord, model: str) -> Extraction:
+def to_extraction(llm: LLMExtraction, email: EmailRecord, model: str, source: str = "groq") -> Extraction:
     """Convert model output to the shared schema, discarding numbers the email does not contain."""
     text = f"{email.subject}\n{email.body}"
     notes = list(llm.uncertainties)
@@ -482,7 +520,7 @@ def to_extraction(llm: LLMExtraction, email: EmailRecord, model: str) -> Extract
     additions = [Deliverable(**d.model_dump()) for d in llm.deliverable_additions] or floor.deliverable_additions
 
     extraction = Extraction(
-        source="groq",
+        source=source,
         model=model,
         is_brand_collaboration=collaboration,
         suggested_category=llm.suggested_category,
@@ -517,8 +555,16 @@ def to_extraction(llm: LLMExtraction, email: EmailRecord, model: str) -> Extract
 
 
 # ---------------------------------------------------------------- orchestration with fallback
+class _ProviderState:
+    def __init__(self, check_model: bool) -> None:
+        self.disabled: str | None = None
+        self.failures = 0
+        self.checked = not check_model
+
+
 class EmailExtractor:
-    """Uses Groq when configured and healthy; otherwise (or on any failure) the deterministic rules."""
+    """Tries each configured provider in order (Groq, then Gemini) for every email; if all fail, or none
+    is configured, uses the deterministic rules. Each extraction records which source answered and why."""
 
     def __init__(
         self,
@@ -528,89 +574,113 @@ class EmailExtractor:
         clock: Callable[[], float] = time.monotonic,
     ) -> None:
         self.settings = settings
+        providers = providers_from_settings(settings) if settings.ai_enabled else []
         self.disabled_reason: str | None = None
         if not settings.ai_enabled:
             self.disabled_reason = "ai_disabled"
-        elif not settings.has_api_key:
+        elif not providers:
             self.disabled_reason = "no_api_key"
-        self.client = GroqClient(settings, http_client, sleep, clock) if self.disabled_reason is None else None
-        self._checked_model = not settings.ai_check_model
-        self._consecutive_failures = 0
+        self.clients = [ChatClient(settings, http_client, sleep, clock, provider=p) for p in providers]
+        self._state = {c.provider.name: _ProviderState(settings.ai_check_model) for c in self.clients}
         self.stats: Counter[str] = Counter()
 
-    def check_model(self) -> None:
-        """Fail loudly (and stop calling) if the configured model is not served to this key."""
-        if self._checked_model or self.client is None:
+    @property
+    def client(self) -> ChatClient | None:
+        """The primary provider's client (Groq when configured)."""
+        return self.clients[0] if self.clients else None
+
+    def check_model(self, client: ChatClient) -> None:
+        """Fail loudly (and stop calling that provider) if its model is not served to this key."""
+        state = self._state[client.provider.name]
+        if state.checked:
             return
-        self._checked_model = True
+        state.checked = True
         try:
-            available = self.client.list_models()
+            available = client.list_models()
         except AIExtractionError as exc:
             if exc.reason == "auth_error":
-                self._disable("auth_error", "Groq rejected the API key (HTTP 401/403).")
+                self._disable(client, "auth_error", "API key rejected (HTTP 401/403).")
             else:
-                logger.warning("Could not list Groq models (%s); trying the configured model anyway.", exc.reason)
+                logger.warning("Could not list %s models (%s); trying the configured model anyway.",
+                               client.provider.name, exc.reason)
             return
-        if self.settings.groq_model not in available:
-            self._disable("model_unavailable",
-                          f"Groq model '{self.settings.groq_model}' is not available to this key. "
-                          f"Set GROQ_MODEL to one of: {', '.join(sorted(available)[:8])}")
+        if client.provider.model not in available:
+            self._disable(client, "model_unavailable",
+                          f"Model '{client.provider.model}' is not available to this key. "
+                          f"Available: {', '.join(sorted(available)[:8])}")
 
-    def _disable(self, reason: str, message: str) -> None:
-        self.disabled_reason = reason
-        logger.warning("%s Falling back to deterministic rules for the rest of the run.", message)
+    def _disable(self, client: ChatClient, reason: str, message: str) -> None:
+        self._state[client.provider.name].disabled = reason
+        logger.warning("%s: %s No further %s calls this run.", client.provider.name, message, client.provider.name)
 
     def extract(self, email: EmailRecord) -> Extraction:
-        llm = self._cache_get(email) if self.disabled_reason is None else None
-        if llm is None:
-            self.check_model()
-            if self.disabled_reason or self.client is None:
-                return self._fallback(email, self.disabled_reason or "ai_disabled")
-            try:
-                include_skeleton = self.settings.response_format_mode != "json_schema"
-                llm = parse_llm_content(self.client.chat_json(build_messages(email, include_skeleton)))
-            except AIExtractionError as exc:
-                self._consecutive_failures += 1
-                logger.warning("Groq extraction failed for %s (%s); using rules.", email.id, exc)
-                if exc.reason in FATAL_REASONS:
-                    self._disable(exc.reason, f"Groq error '{exc.reason}'.")
-                elif self._consecutive_failures >= CIRCUIT_BREAKER_THRESHOLD:
-                    self._disable("circuit_open", f"{self._consecutive_failures} Groq failures in a row.")
-                return self._fallback(email, exc.reason)
-            self._cache_put(email, llm)
-        self._consecutive_failures = 0
-        self.stats["groq"] += 1
-        return to_extraction(llm, email, self.settings.groq_model)
+        if not self.clients:
+            return self._fallback(email, self.disabled_reason or "ai_disabled")
+        failures: list[tuple[str, str]] = []
+        for client in self.clients:
+            name, state = client.provider.name, self._state[client.provider.name]
+            llm = self._cache_get(email, client) if state.disabled is None else None
+            if llm is None:
+                self.check_model(client)
+                if state.disabled:
+                    failures.append((name, state.disabled))
+                    continue
+                try:
+                    include_skeleton = client.provider.response_format != "json_schema"
+                    llm = parse_llm_content(client.chat_json(build_messages(email, include_skeleton)))
+                except AIExtractionError as exc:
+                    state.failures += 1
+                    logger.warning("%s extraction failed for %s (%s).", name, email.id, exc)
+                    if exc.reason in FATAL_REASONS:
+                        self._disable(client, exc.reason, f"error '{exc.reason}'.")
+                    elif state.failures >= CIRCUIT_BREAKER_THRESHOLD:
+                        self._disable(client, "circuit_open", f"{state.failures} failures in a row.")
+                    failures.append((name, exc.reason))
+                    continue
+                self._cache_put(email, client, llm)
+            state.failures = 0
+            self.stats[name] += 1
+            extraction = to_extraction(llm, email, client.provider.model, source=name)
+            if failures:
+                extraction.fallback_reason = self._describe(failures)
+            return extraction
+        return self._fallback(email, self._describe(failures))
+
+    def _describe(self, failures: list[tuple[str, str]]) -> str:
+        if len(self.clients) == 1:
+            return failures[0][1]  # single provider: keep the plain reason ("timeout", "auth_error", ...)
+        return "; ".join(f"{name}:{reason}" for name, reason in failures)
 
     def _fallback(self, email: EmailRecord, reason: str) -> Extraction:
         self.stats[f"rules:{reason}"] += 1
         return extract_with_rules(email, fallback_reason=reason)
 
     # Disk cache of validated model output so re-runs do not repeat rate-limited API calls.
-    def _cache_path(self, email: EmailRecord) -> Path:
+    def _cache_path(self, email: EmailRecord, client: ChatClient) -> Path:
         material = json.dumps(
-            {"v": PROMPT_VERSION, "model": self.settings.groq_model, "from": email.sender,
-             "subject": email.subject, "body": email.body},
+            {"v": PROMPT_VERSION, "provider": client.provider.name, "model": client.provider.model,
+             "from": email.sender, "subject": email.subject, "body": email.body},
             sort_keys=True,
         )
         return self.settings.ai_cache_dir / f"{hashlib.sha256(material.encode()).hexdigest()}.json"
 
-    def _cache_get(self, email: EmailRecord) -> LLMExtraction | None:
-        if not self.settings.ai_cache_enabled or self.client is None:
+    def _cache_get(self, email: EmailRecord, client: ChatClient) -> LLMExtraction | None:
+        if not self.settings.ai_cache_enabled:
             return None
-        path = self._cache_path(email)
+        path = self._cache_path(email, client)
         if not path.exists():
             return None
         try:
-            self.stats["cache_hits"] += 1
-            return LLMExtraction.model_validate_json(path.read_text(encoding="utf-8"))
+            llm = LLMExtraction.model_validate_json(path.read_text(encoding="utf-8"))
         except (OSError, ValidationError):
             return None
+        self.stats["cache_hits"] += 1
+        return llm
 
-    def _cache_put(self, email: EmailRecord, llm: LLMExtraction) -> None:
+    def _cache_put(self, email: EmailRecord, client: ChatClient, llm: LLMExtraction) -> None:
         if not self.settings.ai_cache_enabled:
             return
-        path = self._cache_path(email)
+        path = self._cache_path(email, client)
         try:
             path.parent.mkdir(parents=True, exist_ok=True)
             path.write_text(llm.model_dump_json(), encoding="utf-8")

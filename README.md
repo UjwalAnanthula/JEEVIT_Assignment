@@ -2,7 +2,7 @@
 
 Reads a creator's brand inbox and tells them, for every email and every deal: **what it is, what the deal actually says, what's risky, and what to do next**, with a draft reply where a reply makes sense. Nothing is ever sent.
 
-It runs fully offline on deterministic rules, and uses Groq (free tier) for extraction when an API key is configured.
+It runs fully offline on deterministic rules. When API keys are configured it uses an LLM for extraction: **Groq first, Gemini if Groq fails, rules if both fail**.
 
 ## Quick start (fresh clone)
 
@@ -15,19 +15,20 @@ pip install -r requirements.txt
 python -m app.main              # no key needed: deterministic rules
 ```
 
-Optional Groq extraction:
+Optional AI extraction:
 
 ```bash
-copy .env.example .env          # macOS/Linux: cp .env.example .env ; then set GROQ_API_KEY
-python -m app.main --check-ai   # one live call: proves key, model and schema work
-python -m app.main              # uses Groq, falls back to rules per email on any failure
+copy .env.example .env          # macOS/Linux: cp .env.example .env
+# set GROQ_API_KEY (console.groq.com) and, optionally, GEMINI_API_KEY (Google AI Studio)
+python -m app.main --check-ai   # one live call per configured provider
+python -m app.main              # per email: Groq -> Gemini -> rules
 ```
 
 Other commands:
 
 | Command | What it does |
 |---|---|
-| `python -m pytest -q` | 105 offline tests (HTTP is mocked; real network is blocked in tests) |
+| `python -m pytest -q` | 112 offline tests (HTTP is mocked; real network is blocked in tests) |
 | `python -m evaluation.evaluate` | Scores against hand-written answers; writes `output/evaluation.md` |
 | `python -m app.main --no-ai` | Force rules only |
 | `docker compose up --build` | Same pipeline in a container (`.env` is read at runtime, never copied into the image) |
@@ -45,14 +46,14 @@ Other commands:
 ## Design: what the model does, what plain code does
 
 ```
-inbox.json -> security scan (code) -> extraction (Groq, or rules fallback) -> grouping (code)
+inbox.json -> security scan (code) -> extraction (Groq -> Gemini -> rules) -> grouping (code)
            -> term reconciliation (code) -> creator-policy checks (code) -> category + action (code)
            -> draft reply (code templates) -> summary.md / drafts.md / deals.json
 ```
 
 | Step | Who | Why |
 |---|---|---|
-| Read messy text into fields: brand, agency, deliverables, fee, currency, dates, usage wording | **Groq** (`openai/gpt-oss-20b`), or rules | Language is varied (Hinglish, paraphrase, agencies). This is where a model helps. |
+| Read messy text into fields: brand, agency, deliverables, fee, currency, dates, usage wording | **Groq** (`openai/gpt-oss-20b`), else **Gemini** (`gemini-3.5-flash-lite`), else rules | Language is varied (Hinglish, paraphrase, agencies). This is where a model helps. |
 | Scam/phishing/injection detection | **Code** | Must not be fooled by the very text it is judging. |
 | Grouping emails into deals; "latest terms" | **Code** | Needs to be explainable: every merge records its evidence. |
 | Rates, currency conversion, exclusivity, content rules, deadlines, usage rights | **Code** | Arithmetic and policy must be exactly right and testable. |
@@ -67,15 +68,17 @@ inbox.json -> security scan (code) -> extraction (Groq, or rules fallback) -> gr
 - The model's opinion can only *add caution* (an "accept" becomes "review manually"). It can never change a category.
 - **Deterministic floor:** the model cannot drop a signal plain code reads from the same text (collaboration intent, explicit revision wording, a stated currency, usage/whitelisting flags). This was added after the first live run; see Evaluation.
 
-**Provenance and fallback.** Every email records whether its extraction came from `groq` or `rules`, and why it fell back. Possible reasons: `no_api_key`, `timeout`, `rate_limited`, `invalid_json`, `validation_error`, `model_unavailable`, `security_prefilter`, and others. The client:
-- retries using Groq's `retry-after`;
+**Fallback chain and provenance.** For each email, the configured providers are tried in order: Groq, then Gemini (both through their OpenAI-compatible APIs), then the deterministic rules. A provider without a key is skipped. Each email records which source answered (`groq`, `gemini` or `rules`) and why earlier ones failed, e.g. `groq:rate_limited` or `groq:timeout; gemini:invalid_json`. The client:
+- retries using `retry-after`;
 - paces itself on Groq's rate-limit headers (the free tier allows 8K tokens/min);
-- stops after auth, missing-model or daily-limit errors;
-- caches validated output by content hash.
+- stops calling a provider after auth, missing-model or daily-limit errors, so later emails go straight to the next one;
+- caches validated output per provider and model.
 
-**Model choice.** `llama-3.3-70b-versatile` became Enterprise-only on Groq (checked Nov 2026), so the default is the free-tier `openai/gpt-oss-20b`. It runs with strict `json_schema` output, `reasoning_effort=low` and reasoning excluded. A preflight check against `/models` fails loudly instead of silently falling back.
+The same safety rules, grounding and deterministic floor apply whichever provider answers. Both models share the strict JSON schema.
 
-**Why one AI provider, not a chain (Groq → Gemini → OpenRouter).** The deterministic fallback already guarantees the tool always produces an answer. Adding a second LLM provider would make results depend on which model happened to answer, so each would need its own evaluation. It would also mean another API key and another third party receiving the creator's email. One measured model plus rules keeps accuracy known and reproducible. A backup provider is a reasonable production addition once it has its own evaluation.
+**Model choice.** `llama-3.3-70b-versatile` became Enterprise-only on Groq (checked Nov 2026), so the default is the free-tier `openai/gpt-oss-20b` with strict `json_schema` output and low reasoning effort. Gemini's fallback default is the stable `gemini-3.5-flash-lite` (`gemini-2.5-flash` is deprecated). Both are configurable in `.env`. A preflight check against each provider's `/models` fails loudly instead of silently falling back.
+
+**Trade-off.** When Gemini answers instead of Groq, results can differ slightly, which is why provenance records the provider per email. The evaluation figures below were measured with Groq. Gemini is only used when Groq fails, and has not been evaluated live yet (no Gemini key during development).
 
 ## The tricky emails
 
@@ -178,14 +181,31 @@ What I'd change for that volume:
 
 ## With another week
 
-1. **Real inbox:** Gmail/Outlook read-only import (OAuth), thread headers, persistence in Postgres with full deal history.
-2. **Review UI:** one screen per deal (terms, risks, evidence, editable draft, "mark as sent"), with creator feedback stored as labels.
-3. **Evaluation:** 100+ real anonymised emails labelled by two people, Groq-vs-rules comparison per field, tracked in CI.
-4. **Smarter extraction:**
-   - attachment parsing (PDF briefs) in a sandbox;
-   - a dedicated prompt-injection classifier as an extra signal;
-   - Hindi/Hinglish reply drafts.
-5. **Per-creator policy editor**, so rules like "no crypto" are structured data rather than parsed sentences.
+These are the improvements I would make next, in priority order. They are suggestions, not part of this submission.
+
+**1. Know how good it is on real mail**
+- Label 100+ real, anonymised creator emails with two independent reviewers, and measure agreement between them.
+- Evaluate Groq, Gemini and rules separately per field, and run the evaluation in CI so a prompt or rule change can't silently lower accuracy.
+- Add per-field confidence, so low-confidence extractions are routed to review instead of acted on.
+
+**2. Connect to a real inbox and keep history**
+- Gmail/Outlook read-only import (OAuth) using real thread headers (`Message-ID`, `In-Reply-To`) for grouping.
+- PostgreSQL for emails, extractions and deal events, keyed by `Message-ID` so reruns are idempotent.
+- A queue with a paced worker for 1,000+ emails/day, plus alerts on fallback rate, validation errors and spend.
+
+**3. A review screen the creator would trust**
+- One screen per deal: latest terms, term history, risks with evidence, and an editable draft with "mark as sent".
+- Store the creator's edits and overrides as new labels for evaluation.
+
+**4. Better extraction and safety**
+- Read PDF/DOCX briefs (like E-15's attachment) in a sandbox instead of only asking for the details.
+- Add a dedicated prompt-injection classifier as an extra signal alongside the current patterns.
+- Recognise competitor brands by name, not only by category keywords, for exclusivity checks.
+- Replies in the brand's language (Hindi/Hinglish) when the email is written that way.
+- Use the Groq Batch API for non-urgent backfills to cut cost.
+
+**5. Creator-editable policy**
+- Turn the profile's free-text rules ("No crypto or trading-tip promotions") into structured settings the creator edits: blocked categories, minimum rates per deliverable, usage and whitelisting pricing, barter preferences. This removes the need to parse sentences.
 
 ## Where AI coding tools were used
 
@@ -211,7 +231,7 @@ app/
   core/config.py         settings from env/.env (key is a SecretStr)
   models/schemas.py      Pydantic models: email, extraction, terms, risks, deals, drafts
   services/
-    ai_extractor.py      Groq client, strict schema, grounding, pacing, cache, fallback
+    ai_extractor.py      Groq -> Gemini chain, strict schema, grounding, pacing, cache, rules fallback
     rule_classifier.py   rules extraction, security signals, category decision
     deal_grouper.py      thread/subject/brand+campaign grouping with evidence
     term_reconciler.py   latest-terms-by-timestamp with full history
@@ -220,5 +240,5 @@ app/
     reply_generator.py   draft replies (never sent)
   utils/helpers.py       money (lakh/k), dates, domains, sentences
 evaluation/              expected answers, held-out set, evaluate.py
-tests/                   105 offline tests
+tests/                   112 offline tests
 ```

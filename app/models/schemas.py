@@ -23,7 +23,7 @@ PaymentType = Literal["cash", "gifting", "cash_and_gifting", "commission", "unkn
 MessageRole = Literal[
     "initial_offer", "follow_up", "revision", "confirmation", "counter_offer", "other"
 ]
-ExtractionSource = Literal["groq", "rules"]
+ExtractionSource = Literal["groq", "gemini", "rules"]
 Platform = Literal["instagram", "youtube", "other", "unknown"]
 DeliverableType = Literal[
     "reel", "story", "post", "short", "integration", "dedicated_video", "shoutout", "video", "other"

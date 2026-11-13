@@ -102,7 +102,7 @@ def analyze_emails(
     signals = {e.id: detect_security_signals(e) for e in emails}
     extractions = {}
     for email in emails:
-        if settings.ai_skip_threats and extractor.client and is_security_threat(signals[email.id]):
+        if settings.ai_skip_threats and extractor.clients and is_security_threat(signals[email.id]):
             # No model call for detected scams: saves tokens and keeps injection payloads away from the LLM.
             extractions[email.id] = extract_with_rules(email, fallback_reason="security_prefilter")
         else:
@@ -185,8 +185,7 @@ def analyze_emails(
         deals.append(deal)
 
     sources = Counter(x.source for x in extractions.values())
-    client = extractor.client
-    latencies = client.latencies if client else []
+    clients = extractor.clients
     run_info = {
         "reference_date": policy.today.isoformat(),
         "reference_date_source": policy.today_source,
@@ -195,14 +194,15 @@ def analyze_emails(
         "extraction_sources": dict(sources),
         "fallback_reasons": ", ".join(sorted({x.fallback_reason for x in extractions.values() if x.fallback_reason})),
         "ai_enabled": settings.ai_enabled,
-        "api_key_configured": settings.has_api_key,
-        "model": settings.groq_model if sources.get("groq") else None,
+        # Provider order = fallback order (Groq first, then Gemini), only those with a key configured.
+        "ai_providers": [{"name": c.provider.name, "model": c.provider.model,
+                          "response_format": c.provider.response_format} for c in clients],
         "prompt_version": PROMPT_VERSION,
-        "response_format": settings.response_format_mode if sources.get("groq") else None,
-        "groq_http_calls": client.calls if client else 0,
-        "groq_cache_hits": extractor.stats.get("cache_hits", 0),
-        "groq_tokens": dict(client.usage) if client else {},
-        "groq_avg_latency_seconds": round(sum(latencies) / len(latencies), 2) if latencies else None,
+        "ai_calls": {c.provider.name: c.calls for c in clients},
+        "ai_cache_hits": extractor.stats.get("cache_hits", 0),
+        "ai_tokens": {c.provider.name: dict(c.usage) for c in clients if c.usage},
+        "ai_avg_latency_seconds": {c.provider.name: round(sum(c.latencies) / len(c.latencies), 2)
+                                   for c in clients if c.latencies},
     }
     ordered = [analyses[e.id] for e in emails]  # keep input order for email-level output
     return PipelineResult(ordered, deals, run_info)

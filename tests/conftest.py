@@ -19,8 +19,9 @@ ROOT = Path(__file__).resolve().parents[1]
 def offline(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> Settings:
     monkeypatch.chdir(ROOT)  # relative paths such as Path("data") work from any launch directory
     monkeypatch.delenv("GROQ_API_KEY", raising=False)
-    settings = Settings(_env_file=None, groq_api_key="", ai_enabled=False, ai_cache_enabled=False,
-                        ai_cache_dir=tmp_path / "ai-cache")
+    monkeypatch.delenv("GEMINI_API_KEY", raising=False)
+    settings = Settings(_env_file=None, groq_api_key="", gemini_api_key="", ai_enabled=False,
+                        ai_cache_enabled=False, ai_cache_dir=tmp_path / "ai-cache")
     monkeypatch.setattr(config, "settings", settings)
 
     def no_network(*_args, **_kwargs):
@@ -72,7 +73,7 @@ class StubExtractor:
 
     def __init__(self, extractions: dict[str, Extraction]) -> None:
         self.extractions = extractions
-        self.client = None
+        self.clients: list = []
         self.stats: dict[str, int] = {}
 
     def extract(self, email: EmailRecord) -> Extraction:
