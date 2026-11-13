@@ -497,3 +497,15 @@ def test_gemini_only_and_prefixed_model_ids(inbox, tmp_path):
     assert [c.provider.name for c in extractor.clients] == ["gemini"]
     x = extractor.extract(inbox["E-01"])
     assert x.source == "gemini" and x.fallback_reason is None
+
+
+def test_greeted_recipient_is_not_taken_as_the_sender(inbox, tmp_path):
+    # Seen live: the model returned the creator ("Hi Riya, ...") as the contact name.
+    for email_id, wrong in (("E-15", "Riya"), ("E-06", "Riya ji"), ("E-09", "pr@brewbox.co")):
+        llm = {"is_brand_collaboration": True, "suggested_category": "needs_more_info", "contact_name": wrong}
+        extractor, _ = make_extractor(lambda request, llm=llm: completion(llm), tmp_path)
+        x = extractor.extract(inbox[email_id])
+        assert x.contact_name is None and any("greets" in n or "address" in n for n in x.uncertainties), email_id
+    signer = {**DEW_LAB_LLM, "contact_name": "Arjun", "fee_amount": 100000}
+    extractor, _ = make_extractor(lambda request: completion(signer), tmp_path)
+    assert extractor.extract(inbox["E-11"]).contact_name == "Arjun"  # the real sender is kept

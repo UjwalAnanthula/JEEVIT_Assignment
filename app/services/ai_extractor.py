@@ -40,7 +40,14 @@ from app.models.schemas import (
     UsageRights,
 )
 from app.services.rule_classifier import extract_with_rules, missing_from_extraction
-from app.utils.helpers import amount_in_text, currency_in_text, parse_timeline, sender_address, truncate
+from app.utils.helpers import (
+    amount_in_text,
+    currency_in_text,
+    normalize_key,
+    parse_timeline,
+    sender_address,
+    truncate,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -430,6 +437,18 @@ class ChatClient:
         return content
 
 
+_GREETING_RE = re.compile(r"^\s*(?:hi|hello|hey|dear|namaste|greetings)\b[\s,]*(?P<name>[^,\n!.]{1,40})", re.I)
+
+
+def is_greeted_name(body: str, name: str) -> bool:
+    """True when `name` is who the email is addressed to ('Hi Riya, ...'), i.e. the recipient, not the sender."""
+    match = _GREETING_RE.match(body)
+    if not match:
+        return False
+    greeted, candidate = normalize_key(match.group("name")), normalize_key(name)
+    return len(candidate) >= 2 and (greeted.startswith(candidate) or candidate.startswith(greeted))
+
+
 def parse_llm_content(content: str) -> LLMExtraction:
     text = content.strip()
     fenced = re.match(r"^```(?:json)?\s*(.*?)\s*```$", text, re.S)
@@ -518,6 +537,13 @@ def to_extraction(llm: LLMExtraction, email: EmailRecord, model: str, source: st
         role = floor.message_role
         notes.append(f"Message role set to '{role}' from explicit wording in the email.")
     additions = [Deliverable(**d.model_dump()) for d in llm.deliverable_additions] or floor.deliverable_additions
+    contact = llm.contact_name
+    if contact and "@" in contact:
+        notes.append("Model returned an email address as the contact name; left empty.")
+        contact = None
+    elif contact and is_greeted_name(email.body, contact):
+        notes.append(f"'{contact}' is the person the email greets, not the sender; contact name left empty.")
+        contact = None
 
     extraction = Extraction(
         source=source,
@@ -526,7 +552,7 @@ def to_extraction(llm: LLMExtraction, email: EmailRecord, model: str, source: st
         suggested_category=llm.suggested_category,
         brand=llm.brand,
         agency=llm.agency,
-        contact_name=llm.contact_name,
+        contact_name=contact,
         contact_email=sender_address(email.sender),
         campaign_name=llm.campaign_name,
         product=llm.product,

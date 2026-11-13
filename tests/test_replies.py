@@ -66,3 +66,12 @@ def test_prose_deliverables():
              Deliverable(platform="youtube", type="integration", quantity=1)]
     assert prose_deliverables(items) == "2 Instagram reels, 1 Instagram story and 1 YouTube integration"
     assert prose_deliverables([]) == ""
+
+
+def test_draft_never_greets_the_creator(inbox, profile, stub_extractor, analyze):
+    from app.services.rule_classifier import extract_with_rules
+
+    email = inbox["E-06"]
+    x = extract_with_rules(email).model_copy(update={"contact_name": "Riya ji"})  # a wrong extraction
+    draft = analyze([email], extractor=stub_extractor({email.id: x})).deals[0].draft_reply
+    assert draft.body.startswith("Hi Chai & Co team,")

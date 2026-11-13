@@ -1,5 +1,7 @@
 # Builds short draft replies from reconciled terms, risk codes and the creator profile. Nothing is ever sent.
 # Drafts only restate facts found in the emails or the profile; anything missing becomes a question.
+import re
+
 from app.models.schemas import Deal, Deliverable, DraftReply, EmailRecord, Extraction, Risk
 from app.services.risk_analyzer import CreatorPolicy
 from app.services.rule_classifier import strip_reply_prefix
@@ -35,8 +37,15 @@ def _first_name(policy: CreatorPolicy) -> str:
     return (policy.name or "").split()[0] if policy.name else ""
 
 
-def _greeting(x: Extraction, brand: str | None) -> str:
-    if x.contact_name:
+def _is_creator(name: str, policy: CreatorPolicy) -> bool:
+    """'Riya', 'Riya ji' or 'Riya Menon' all refer to the creator, who must never be greeted in her own reply."""
+    creator = set(re.findall(r"[a-z]+", (policy.name or "").lower()))
+    first = re.findall(r"[a-z]+", name.lower())[:1]
+    return bool(creator and first) and first[0] in creator
+
+
+def _greeting(x: Extraction, brand: str | None, policy: CreatorPolicy) -> str:
+    if x.contact_name and "@" not in x.contact_name and not _is_creator(x.contact_name, policy):
         return f"Hi {x.contact_name},"
     return f"Hi {brand} team," if brand else "Hi,"
 
@@ -135,7 +144,7 @@ def build_draft(deal: Deal, latest: EmailRecord, latest_x: Extraction, policy: C
     action = deal.recommendation.action
     if action in NO_REPLY_ACTIONS:
         return None
-    greeting = _greeting(latest_x, deal.brand)
+    greeting = _greeting(latest_x, deal.brand, policy)
     sign = f"\n\nBest,\n{_first_name(policy)}".rstrip()
     about = f" about the {deal.campaign} campaign" if deal.campaign else ""
     asks = [_ASK_LABELS.get(m, m.replace("_", " ")) for m in deal.missing_information]
