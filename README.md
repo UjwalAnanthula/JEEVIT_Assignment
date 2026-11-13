@@ -55,6 +55,30 @@ python -m app.main              # per email: Groq -> Gemini -> rules
 > - MEDIUM: Agency authority not verified. Brightside Agency (brightside-agency.com) says it represents Dew Lab. Earlier brand emails came from dewlab.in. It asks: 'Please send your GST details and confirm.'
 > - To do: Counter at INR 1,10,000 or more ... Confirm with Dew Lab directly before sharing GST details.
 
+## Project layout
+
+```
+dashboard.py             Streamlit dashboard (localhost:8501)
+ui/                      dashboard components (components.py) and styles (theme.css)
+.streamlit/config.toml   dashboard settings: localhost only, no usage statistics
+app/
+  main.py                CLI (--no-ai, --check-ai)
+  pipeline.py            orchestration; writes all outputs
+  core/config.py         settings from env/.env (keys are SecretStr)
+  models/schemas.py      Pydantic models: email, extraction, terms, risks, deals, drafts
+  services/
+    ai_extractor.py      Groq -> Gemini chain, strict schema, grounding, pacing, cache, rules fallback
+    rule_classifier.py   rules extraction, security signals, category decision
+    deal_grouper.py      thread/subject/brand+campaign grouping with evidence
+    term_reconciler.py   latest terms by timestamp, with full history
+    risk_analyzer.py     creator-policy checks, rate maths, risks
+    recommendation.py    next step, summary.md, drafts.md
+    reply_generator.py   draft replies (never sent)
+  utils/helpers.py       money (lakh/k), dates, domains, sentences
+evaluation/              expected answers for the 15 emails, evaluate.py
+tests/                   119 offline tests, including a click-through of the dashboard
+```
+
 ## Design
 
 ```
@@ -211,27 +235,3 @@ In priority order. These are suggestions, not part of this submission.
   It ran the tests, pipeline and evaluation after each change, and checked the model choice against Groq's live docs.
 
 All numbers here come from commands run in this repository. First-run results are reported as they were.
-
-## Project layout
-
-```
-dashboard.py             Streamlit dashboard (localhost:8501)
-ui/                      dashboard components (components.py) and styles (theme.css)
-.streamlit/config.toml   dashboard settings: localhost only, no usage statistics
-app/
-  main.py                CLI (--no-ai, --check-ai)
-  pipeline.py            orchestration; writes all outputs
-  core/config.py         settings from env/.env (keys are SecretStr)
-  models/schemas.py      Pydantic models: email, extraction, terms, risks, deals, drafts
-  services/
-    ai_extractor.py      Groq -> Gemini chain, strict schema, grounding, pacing, cache, rules fallback
-    rule_classifier.py   rules extraction, security signals, category decision
-    deal_grouper.py      thread/subject/brand+campaign grouping with evidence
-    term_reconciler.py   latest terms by timestamp, with full history
-    risk_analyzer.py     creator-policy checks, rate maths, risks
-    recommendation.py    next step, summary.md, drafts.md
-    reply_generator.py   draft replies (never sent)
-  utils/helpers.py       money (lakh/k), dates, domains, sentences
-evaluation/              expected answers for the 15 emails, evaluate.py
-tests/                   119 offline tests, including a click-through of the dashboard
-```
