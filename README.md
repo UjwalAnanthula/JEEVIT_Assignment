@@ -29,7 +29,7 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `streamlit run dashboard.py` | Local dashboard at **http://localhost:8501** (see below) |
-| `python -m pytest -q` | 111 offline tests (HTTP is mocked; real network is blocked in tests) |
+| `python -m pytest -q` | 116 offline tests (HTTP is mocked; real network is blocked in tests) |
 | `python -m evaluation.evaluate` | Scores against hand-written answers; writes `output/evaluation.md` |
 | `python -m app.main --no-ai` | Force rules only |
 
@@ -37,18 +37,20 @@ Other commands:
 
 ### Dashboard (optional)
 
-`streamlit run dashboard.py` opens **http://localhost:8501**. It's a read-only view of the same pipeline.
+`streamlit run dashboard.py` opens **http://localhost:8501**. It's a read-only view of the same pipeline, laid out like an inbox workspace:
 
-- **Tabs by what to do:** Needs attention, Decline, Scam warnings, Ignored, plus All emails.
-- **One card per deal**, showing:
-  - the next step and category;
-  - the latest terms in one line (fee, content, dates, usage);
-  - the main risks, with severity;
-  - the to-dos.
-- **Folded on each card:** the **suggested reply** (copyable; nothing is sent) and the **details** (where each term came from, how the terms changed, why the emails were grouped).
-- **All emails:** the classified inbox. Open any email to read it and see what was extracted.
+| Area | Shows |
+|---|---|
+| **Views** (sidebar) | Needs attention · Decline · Scam warnings · Ignored · All emails, each with its count |
+| **List** | The deals (or emails) in the selected view. Search filters it by brand, subject or email ID. |
+| **Detail** | The selected deal: next step and category; a terms grid (fee against your rate, deliverables, platform, dates, usage, payment terms); risks with severity and evidence; suggested actions; and the suggested reply (copyable, marked as a draft). **Deal details** shows where each term came from, how it changed, and why the emails were grouped. |
+| **Overview** | Emails, deals, need attention and scam warnings; emails by category; and which source extracted them |
 
-The sidebar switches between rules only and AI (Groq → Gemini → rules) when keys are configured. AI answers are cached, so the first AI run is the slow one.
+In **All emails**, you can open any email to read it, see what was extracted, and jump to its deal.
+
+The sidebar switches between rules only and AI (Groq → Gemini → rules) when keys are configured, and has a **Re-run analysis** button. AI answers are cached, so the first AI run is the slow one.
+
+The UI lives in `dashboard.py` (layout and state), `ui/components.py` (HTML building blocks) and `ui/theme.css` (design tokens), with matching theme values in `.streamlit/config.toml`. It only presents the pipeline's existing results.
 
 The dashboard:
 - shows email text as plain text, so links in phishing emails are never clickable;
@@ -231,7 +233,8 @@ All numbers in this README come from commands run in this repository, and first-
 ## Project layout
 
 ```
-dashboard.py             Streamlit dashboard (localhost:8501), read-only
+dashboard.py             Streamlit dashboard (localhost:8501), read-only layout and state
+ui/                      dashboard components (components.py) and design tokens (theme.css)
 .streamlit/config.toml   dashboard settings: localhost only, no usage statistics
 app/
   main.py                CLI (--no-ai, --check-ai)
@@ -248,5 +251,5 @@ app/
     reply_generator.py   draft replies (never sent)
   utils/helpers.py       money (lakh/k), dates, domains, sentences
 evaluation/              expected answers for the 15 emails, evaluate.py
-tests/                   111 offline tests (including a headless render of the dashboard)
+tests/                   116 offline tests (including a click-through of every dashboard view)
 ```

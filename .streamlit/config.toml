@@ -1,4 +1,5 @@
-# Streamlit settings for the local dashboard: localhost only on port 8501, no usage statistics sent.
+# Streamlit settings for the local dashboard: localhost only on port 8501, no usage statistics, dark theme.
+# Theme values mirror the tokens in ui/theme.css so native widgets and custom components match.
 [server]
 port = 8501
 address = "localhost"  # the inbox holds private email; do not expose it to the local network
@@ -6,3 +7,28 @@ showEmailPrompt = false  # otherwise the first run waits at an "Email:" prompt a
 
 [browser]
 gatherUsageStats = false
+
+[client]
+toolbarMode = "minimal"  # hides developer items such as "Deploy"
+
+[theme]
+base = "dark"
+primaryColor = "#f2a93b"
+backgroundColor = "#0b0c0f"
+secondaryBackgroundColor = "#171a20"
+textColor = "#e9eaee"
+borderColor = "#23262e"
+dataframeBorderColor = "#23262e"
+dataframeHeaderBackgroundColor = "#171a20"
+linkColor = "#f2a93b"
+codeBackgroundColor = "#121418"
+baseRadius = "10px"
+buttonRadius = "8px"
+showWidgetBorder = true
+showSidebarBorder = true
+paddingTop = "1.25rem"
+
+[theme.sidebar]
+backgroundColor = "#0f1115"
+secondaryBackgroundColor = "#171a20"
+borderColor = "#23262e"
