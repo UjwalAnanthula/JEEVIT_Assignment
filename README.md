@@ -29,7 +29,7 @@ Other commands:
 | Command | What it does |
 |---|---|
 | `streamlit run dashboard.py` | Local dashboard at **http://localhost:8501** (see below) |
-| `python -m pytest -q` | 117 offline tests (HTTP is mocked; real network is blocked in tests) |
+| `python -m pytest -q` | 119 offline tests (HTTP is mocked; real network is blocked in tests) |
 | `python -m evaluation.evaluate` | Scores against hand-written answers; writes `output/evaluation.md` |
 | `python -m app.main --no-ai` | Force rules only |
 
@@ -217,10 +217,17 @@ These are the improvements I would make next, in priority order. They are sugges
 - Stronger injection detection: more phrasings ("if you are an AI…", fake `System:` blocks, "ignore your instructions"), flag hidden text (HTML comments, zero-width characters), and a dedicated prompt-injection classifier as an extra signal.
 - Understand negation in content rules, so "we are not a betting app" is not treated as a betting app.
 - Recognise competitor brands by name, not only by category keywords, for exclusivity checks.
-- Replies in the brand's language (Hindi/Hinglish) when the email is written that way.
 - Use the Groq Batch API for non-urgent backfills to cut cost.
 
-**5. Creator-editable policy**
+**5. AI-written replies with plain-code guardrails**
+
+Today's drafts are deterministic templates: safe, but stiff, and always in English. The next step keeps the same safety:
+- **Plain code decides what the reply must say:** counter amount, usage terms, missing details, agency verification.
+- **Groq writes it** naturally, in the brand's language when the email is in Hindi or Hinglish.
+- **Pydantic validates the draft,** and a check rejects any draft that changes an amount, adds a commitment or drops a required point.
+- **The current template stays as the fallback** whenever the AI draft fails validation or the API is unavailable.
+
+**6. Creator-editable policy**
 - Turn the profile's free-text rules ("No crypto or trading-tip promotions") into structured settings the creator edits: blocked categories, minimum rates per deliverable, usage and whitelisting pricing, barter preferences. This removes the need to parse sentences.
 
 ## Where AI coding tools were used
@@ -260,5 +267,5 @@ app/
     reply_generator.py   draft replies (never sent)
   utils/helpers.py       money (lakh/k), dates, domains, sentences
 evaluation/              expected answers for the 15 emails, evaluate.py
-tests/                   117 offline tests (including a click-through of every dashboard view)
+tests/                   119 offline tests (including a click-through of every dashboard view)
 ```

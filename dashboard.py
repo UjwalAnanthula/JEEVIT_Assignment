@@ -263,7 +263,7 @@ else:
     with st.container(key="panel-list"):
         head_col, search_col = st.columns([3, 2], vertical_alignment="center")
         with head_col:
-            st.html(ui.panel_head_html(VIEW_LABEL[view], counts[view]))
+            st.html(ui.panel_head_html(VIEW_LABEL[view], counts[view], "email" if view == "emails" else "deal"))
         with search_col:
             st.text_input("Search", key="q", value=st.session_state.query, on_change=keep_query,
                           placeholder="Search brand, subject or email ID", label_visibility="collapsed")

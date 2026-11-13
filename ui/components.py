@@ -1,5 +1,6 @@
 # Pure HTML builders for the dashboard. Presentation only: every value comes from existing pipeline objects,
 # and every email-derived string is HTML-escaped (Streamlit's st.html also sanitises the result).
+import re
 from datetime import date, datetime
 from html import escape
 
@@ -30,6 +31,34 @@ SEVERITY_RANK = {"critical": 0, "high": 1, "medium": 2, "low": 3}
 
 def e(value: object) -> str:
     return escape(str(value), quote=True)
+
+
+_HIGHLIGHT_RE = re.compile(
+    r"(?:INR|USD|EUR|GBP|Rs\.?|\u20b9)\s?\d[\d,]*(?:\.\d+)?"  # amounts
+    r"|\d+(?:\.\d+)?%"  # percentages
+    r"|\b\d{1,2}\s(?:Jan|Feb|Mar|Apr|May|Jun|Jul|Aug|Sep|Oct|Nov|Dec)[a-z]*(?:\s\d{4})?\b"  # dates
+)
+
+
+def emphasize(text: str) -> str:
+    """Escape text, then bold the facts a reader scans for: amounts, percentages and dates."""
+    out, last = [], 0
+    for match in _HIGHLIGHT_RE.finditer(text):
+        out.append(e(text[last:match.start()]))
+        out.append(f'<strong class="bd-hl">{e(match.group())}</strong>')
+        last = match.end()
+    out.append(e(text[last:]))
+    return "".join(out)
+
+
+def counted(count: int, noun: str) -> str:
+    """'1 risk', '3 actions': a count that cannot be mistaken for a step or section number."""
+    return f"{count} {noun}{'' if count == 1 else 's'}"
+
+
+def section_html(title: str, count: int | None = None, noun: str = "item") -> str:
+    count_html = f'<span class="bd-tab-count">{e(counted(count, noun))}</span>' if count is not None else ""
+    return f'<div class="bd-section-title"><span>{e(title)}</span>{count_html}</div>'
 
 
 def chip(text: str, color: str) -> str:
@@ -117,8 +146,8 @@ def view_tab_html(label: str, count: int, color: str) -> str:
                 f'<span class="bd-tab-count">{count}</span></div>')
 
 
-def panel_head_html(title: str, count: int | None = None) -> str:
-    count_html = f'<span class="bd-tab-count">{count}</span>' if count is not None else ""
+def panel_head_html(title: str, count: int | None = None, noun: str = "item") -> str:
+    count_html = f'<span class="bd-tab-count">{e(counted(count, noun))}</span>' if count is not None else ""
     return wrap(f'<div class="bd-panel-head"><span class="bd-panel-title">{e(title)}</span>{count_html}</div>')
 
 
@@ -195,10 +224,12 @@ def deal_head_html(deal: Deal, sender: str | None = None) -> str:
     if deal.last_received_at != deal.first_received_at:
         span = f"{short_time(deal.first_received_at)} → {short_time(deal.last_received_at)}"
     return wrap(
-        f'<div class="bd-detail-chips">{chip(action_label, action_color)}{chip(category_label, "outline")}</div>'
+        f'<div class="bd-detail-chips">{chip(category_label, "outline")}</div>'
         f'<div class="bd-detail-title"><h2>{e(deal_name(deal, sender))}</h2><span class="bd-row-time">{e(span)}</span></div>'
         '<div class="bd-meta-chips">' + "".join(f"<span>{e(m)}</span>" for m in meta) + "</div>"
-        f'<p class="bd-summary">{e(deal.recommendation.summary)}</p>'
+        f'<div class="bd-callout {action_color}"><div class="bd-label">Recommended next step</div>'
+        f'<div class="bd-callout-action">{e(action_label)}</div>'
+        f'<div class="bd-callout-text">{emphasize(deal.recommendation.summary)}</div></div>'
     )
 
 
@@ -247,7 +278,7 @@ def terms_html(deal: Deal) -> str:
         note_html = f'<div class="bd-term-note {tone}">{e(note)}</div>' if note else ""
         cells.append(f'<div class="bd-term"><div class="bd-label">{e(label)}</div>'
                      f'<div class="{css}">{shown or "Not stated"}</div>{note_html}</div>')
-    return wrap('<div class="bd-section-title">Deal terms</div><div class="bd-terms">' + "".join(cells) + "</div>")
+    return wrap(section_html("Deal terms") + '<div class="bd-terms">' + "".join(cells) + "</div>")
 
 
 def _evidence(risk: Risk) -> str:
@@ -255,21 +286,22 @@ def _evidence(risk: Risk) -> str:
         return ""
     ev = risk.evidence[0]
     source = ev.email_id or ("Creator profile" if ev.source == "creator_profile" else "Computed")
-    return f'<div class="bd-risk-evidence">{e(source)} · <q>{e(ev.quote)}</q></div>'
+    return (f'<div class="bd-risk-evidence"><span class="bd-ev-label">Evidence</span>{e(source)} · '
+            f'<q>{e(ev.quote)}</q></div>')
 
 
 def risks_html(risks: list[Risk]) -> str:
     shown = visible_risks(risks)
-    head = f'<div class="bd-section-title">Risks <span class="bd-count">{len(shown)}</span></div>'
+    head = section_html("Risks", len(shown), "risk")
     if not shown:
         return wrap(head + '<p class="bd-empty-note">No medium or higher risks found.</p>')
     items = []
     for risk in shown:
         label, color = SEVERITY[risk.severity]
         items.append(
-            f'<li class="bd-risk {risk.severity}"><div>{chip(label, color)}</div><div>'
-            f'<div class="bd-risk-title">{e(risk.title)}</div>'
-            f'<div class="bd-risk-text">{e(risk.explanation)}</div>{_evidence(risk)}</div></li>'
+            f'<li class="bd-risk {risk.severity}"><div class="bd-risk-head">{chip(label, color)}'
+            f'<span class="bd-risk-title">{e(risk.title)}</span></div>'
+            f'<div class="bd-risk-text">{emphasize(risk.explanation)}</div>{_evidence(risk)}</li>'
         )
     return wrap(head + '<ul class="bd-risks">' + "".join(items) + "</ul>")
 
@@ -277,9 +309,9 @@ def risks_html(risks: list[Risk]) -> str:
 def actions_html(steps: list[str]) -> str:
     if not steps:
         return ""
-    cards = "".join(f'<div class="bd-action"><span class="bd-action-n">{i}</span><span>{e(s)}</span></div>'
+    cards = "".join(f'<div class="bd-action"><span class="bd-action-n">{i}</span><span>{emphasize(s)}</span></div>'
                     for i, s in enumerate(steps, 1))
-    return wrap('<div class="bd-section-title">Suggested actions</div><div class="bd-actions">' + cards + "</div>")
+    return wrap(section_html("Suggested actions", len(steps), "action") + '<div class="bd-actions">' + cards + "</div>")
 
 
 def reply_head_html(draft: DraftReply) -> str:
