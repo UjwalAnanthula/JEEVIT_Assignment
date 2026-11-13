@@ -98,26 +98,27 @@ def visible_risks(risks: list[Risk]) -> list[Risk]:
 
 
 # ---------------------------------------------------------------- chrome
-def header_html(status: str, status_color: str, detail: str) -> str:
+def brand_html() -> str:
     return wrap(
-        '<div class="bd-header">'
         '<div class="bd-brand"><div class="bd-mark">B</div><div>'
         '<div class="bd-title">Brand Deal Inbox Assistant</div>'
         '<div class="bd-subtitle">Classify brand emails · group them into deals · check terms against your rules'
         ' · draft replies for review</div></div></div>'
-        f'<div class="bd-status"><span class="bd-dot {status_color}"></span><b>{e(status)}</b>'
-        f'<span>{e(detail)}</span></div>'
-        "</div>"
     )
 
 
-def nav_item_html(label: str, count: int, color: str) -> str:
-    return wrap(f'<div class="bd-nav"><span class="bd-dot {color}"></span>{e(label)}'
-                f'<span class="bd-nav-count">{count}</span></div>')
+def status_html(status: str, status_color: str, detail: str) -> str:
+    return wrap(f'<div class="bd-status"><span class="bd-dot {status_color}"></span><b>{e(status)}</b>'
+                f'<span>{e(detail)}</span></div>')
+
+
+def view_tab_html(label: str, count: int, color: str) -> str:
+    return wrap(f'<div class="bd-tab"><span class="bd-dot {color}"></span><span class="bd-tab-label">{e(label)}</span>'
+                f'<span class="bd-tab-count">{count}</span></div>')
 
 
 def panel_head_html(title: str, count: int | None = None) -> str:
-    count_html = f'<span class="bd-count">{count}</span>' if count is not None else ""
+    count_html = f'<span class="bd-tab-count">{count}</span>' if count is not None else ""
     return wrap(f'<div class="bd-panel-head"><span class="bd-panel-title">{e(title)}</span>{count_html}</div>')
 
 
@@ -125,49 +126,58 @@ def empty_html(text: str) -> str:
     return wrap(f'<p class="bd-empty-note">{e(text)}</p>')
 
 
-# ---------------------------------------------------------------- list rows
+# ---------------------------------------------------------------- list rows (full width, one per deal or email)
+_CHEVRON = '<span class="bd-chev" aria-hidden="true">›</span>'
+
+
 def deal_row_html(deal: Deal, sender: str | None = None) -> str:
     label, color = ACTION[deal.recommendation.action]
-    sub = f"via {deal.agency}" if deal.agency else deal.recommendation.summary
     terms = deal.terms
-    snippet = []
+    money, content = "—", ""
     if deal.category not in ("scam_or_phishing", "spam"):
-        if terms.current("compensation"):
-            snippet.append(format_money(terms.current("compensation")))
+        comp = terms.current("compensation")
+        if comp:
+            money = format_money(comp)
         elif terms.current("payment_type") == "gifting":
-            snippet.append("Product only")
+            money = "Product only"
+        else:
+            money = "Fee not stated"
         if terms.current("deliverables"):
-            snippet.append(prose_deliverables(terms.current("deliverables")))
+            content = prose_deliverables(terms.current("deliverables"))
     risks = visible_risks(deal.risks)
     risk_chip = ""
     if risks:
-        sev_label, sev_color = SEVERITY[risks[0].severity]
-        risk_chip = chip(f"{len(risks)} risk{'s' if len(risks) != 1 else ''}", sev_color)
+        risk_chip = chip(f"{len(risks)} risk{'s' if len(risks) != 1 else ''}", SEVERITY[risks[0].severity][1])
     emails = f"{len(deal.email_ids)} emails" if len(deal.email_ids) > 1 else deal.email_ids[0]
+    who = f"via {deal.agency}" if deal.agency else ", ".join(deal.email_ids)
     return wrap(
-        '<div class="bd-row">'
-        f'<div class="bd-row-top"><span class="bd-dot {color}"></span>'
-        f'<span class="bd-row-title">{e(deal_name(deal, sender))}</span>'
-        f'<span class="bd-row-time">{e(short_time(deal.last_received_at))}</span></div>'
-        f'<div class="bd-row-sub">{e(sub)}</div>'
-        + (f'<div class="bd-row-sub">{e(" · ".join(snippet))}</div>' if snippet else "")
-        + f'<div class="bd-row-foot">{chip(label, color)}{risk_chip}<span class="bd-row-meta">{e(emails)}</span></div>'
-        "</div>"
+        '<div class="bd-hrow">'
+        f'<div class="bd-hcell"><div class="bd-row-top"><span class="bd-dot {color}"></span>'
+        f'<span class="bd-row-title">{e(deal_name(deal, sender))}</span></div>'
+        f'<div class="bd-row-sub">{e(who)}</div></div>'
+        f'<div class="bd-hcell bd-hsummary">{e(deal.recommendation.summary)}</div>'
+        f'<div class="bd-hcell"><div class="bd-hmoney">{e(money)}</div>'
+        f'<div class="bd-row-sub">{e(content)}</div></div>'
+        f'<div class="bd-hcell bd-hchips">{chip(label, color)}{risk_chip}</div>'
+        f'<div class="bd-hcell bd-hmeta"><span>{e(short_time(deal.last_received_at))}</span><span>{e(emails)}</span></div>'
+        f"{_CHEVRON}</div>"
     )
 
 
 def email_row_html(analysis: Analysis, body: str) -> str:
     label, color = CATEGORY[analysis.category]
-    preview = " ".join(body.split())[:90]
+    preview = " ".join(body.split())
     return wrap(
-        '<div class="bd-row">'
-        f'<div class="bd-row-top"><span class="bd-dot {color}"></span>'
-        f'<span class="bd-row-title">{e(analysis.brand or analysis.sender)}</span>'
-        f'<span class="bd-row-time">{e(short_time(analysis.received_at))}</span></div>'
-        f'<div class="bd-row-sub"><b>{e(analysis.subject)}</b></div>'
-        f'<div class="bd-row-sub">{e(preview)}</div>'
-        f'<div class="bd-row-foot">{chip(label, color)}<span class="bd-row-meta">{e(analysis.email_id)}</span></div>'
-        "</div>"
+        '<div class="bd-hrow">'
+        f'<div class="bd-hcell"><div class="bd-row-top"><span class="bd-dot {color}"></span>'
+        f'<span class="bd-row-title">{e(analysis.brand or analysis.sender)}</span></div>'
+        f'<div class="bd-row-sub">{e(analysis.sender)}</div></div>'
+        f'<div class="bd-hcell bd-hsummary"><b>{e(analysis.subject)}</b><br>'
+        f'<span class="bd-muted">{e(preview)}</span></div>'
+        f'<div class="bd-hcell bd-hchips">{chip(label, color)}</div>'
+        f'<div class="bd-hcell bd-hmeta"><span>{e(short_time(analysis.received_at))}</span>'
+        f"<span>{e(analysis.email_id)}</span></div>"
+        f"{_CHEVRON}</div>"
     )
 
 
