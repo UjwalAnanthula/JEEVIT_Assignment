@@ -77,7 +77,7 @@ The same safety rules, grounding and deterministic floor apply whichever provide
 
 **Model choice.** `llama-3.3-70b-versatile` became Enterprise-only on Groq (checked Nov 2026), so the default is the free-tier `openai/gpt-oss-20b` with strict `json_schema` output and low reasoning effort. Gemini's fallback default is the stable `gemini-3.5-flash-lite` (`gemini-2.5-flash` is deprecated). Both are configurable in `.env`. A preflight check against each provider's `/models` fails loudly instead of silently falling back.
 
-**Trade-off.** When Gemini answers instead of Groq, results can differ slightly, which is why provenance records the provider per email. The evaluation figures below were measured with Groq. Gemini is only used when Groq fails, and has not been evaluated live yet (no Gemini key during development).
+**Trade-off.** When Gemini answers instead of Groq, results can differ slightly, which is why provenance records the provider per email. Both were evaluated live (see Evaluation). The fallback was tested by pointing Groq at a model that doesn't exist: the model check flagged it, Groq was skipped, and Gemini answered every email.
 
 ## The tricky emails
 
@@ -106,17 +106,17 @@ I wrote expected answers by hand for all 15 emails ([evaluation/expected_results
 
 Fields that the email doesn't state are scored too, so a **made-up value** counts as an error. Run `python -m evaluation.evaluate` (rules) or `--ai` (live model).
 
-| Metric | Rules, first run | Rules, now | Groq, first run | Groq, now |
-|---|---|---|---|---|
-| Category | 15/15 | 15/15 | **14/15** | 15/15 |
-| Next step (per email) | 15/15 | 15/15 | **14/15** | 15/15 |
-| Deal grouping | 13/13 | 13/13 | 13/13 | 13/13 |
-| Risks flagged | 14/14 | 14/14 | 14/14 | 14/14 |
-| Fields | fee **14/15**, rest 100% | 100% | 100% | 100% |
-| Dew Lab deal's latest terms | 5/5 | 5/5 | 5/5 | 5/5 |
-| Made-up values | **1** | 0 | 0 | 0 |
+| Metric | Rules, first run | Rules, now | Groq, first run | Groq, now | Gemini (fallback) |
+|---|---|---|---|---|---|
+| Category | 15/15 | 15/15 | **14/15** | 15/15 | 15/15 |
+| Next step (per email) | 15/15 | 15/15 | **14/15** | 15/15 | 15/15 |
+| Deal grouping | 13/13 | 13/13 | 13/13 | 13/13 | 13/13 |
+| Risks flagged | 14/14 | 14/14 | 14/14 | 14/14 | 14/14 |
+| Fields | fee **14/15**, rest 100% | 100% | 100% | 100% | 100% |
+| Dew Lab deal's latest terms | 5/5 | 5/5 | 5/5 | 5/5 | 5/5 |
+| Made-up values | **1** | 0 | 0 | 0 | 0 |
 
-Groq ran live with `openai/gpt-oss-20b` on 13 Nov 2026. Emails already flagged as scams are not sent to the model.
+Both models ran live on 13 Nov 2026: Groq with `openai/gpt-oss-20b`, Gemini with `gemini-3.5-flash-lite`. Gemini was measured with Groq forced to fail, so Gemini answered all 12 non-scam emails; it was run once, with the deterministic floor already in place. Emails already flagged as scams are not sent to any model.
 
 **What it got wrong, and the fixes:**
 1. **Rules, E-07:** the rule extractor read the injected "Rs 5,00,000" as a fee. Deal terms already excluded it; now an amount inside instructions aimed at an AI is never read as a fee.
@@ -128,13 +128,13 @@ Groq ran live with `openai/gpt-oss-20b` on 13 Nov 2026. Emails already flagged a
 
 Measured on the 15-email inbox (live run, 13 Nov 2026):
 
-| | Rules | Groq `gpt-oss-20b` |
-|---|---|---|
-| Time | ~2 ms/email | **0.84 s** average per call |
-| Tokens | 0 | **~1,480 input + ~250 output** per email (12 calls, 20,738 tokens total) |
-| Cost | 0 | ≈ **$0.0002/email** at $0.075/M input and $0.30/M output (Developer plan prices) |
+| | Rules | Groq `gpt-oss-20b` | Gemini `gemini-3.5-flash-lite` (fallback) |
+|---|---|---|---|
+| Time | ~2 ms/email | **0.84 s** average per call | **1.9 s** average per call |
+| Tokens | 0 | **~1,480 input + ~250 output** per email | **~680 input + ~360 output** per email |
+| Cost | 0 | ≈ **$0.0002/email** at $0.075/M input and $0.30/M output (Developer plan prices) | not measured (Gemini pricing not checked) |
 
-The whole 15-email Groq run took 114 s, almost all of it pacing for the free tier's 8K tokens/min. Three detected scams were not sent to the model.
+The whole 15-email Groq run took 114 s, almost all of it pacing for the free tier's 8K tokens/min. The Gemini run took 24 s. Three detected scams were not sent to either model.
 
 **At 1,000 emails/day:**
 - **Cost:** about $0.19/day (~$6/month) on the Developer plan.
@@ -166,7 +166,7 @@ These are the improvements I would make next, in priority order. They are sugges
 **1. Know how good it is on real mail**
 - Write a held-out set of new emails *before* running the system on them (new phrasings, look-alike domains, agency follow-ups, Hinglish) and report the first, blind score.
 - Label 100+ real, anonymised creator emails with two independent reviewers, and measure agreement between them.
-- Evaluate Groq, Gemini and rules separately per field, and run the evaluation in CI so a prompt or rule change can't silently lower accuracy.
+- Evaluate Groq, Gemini and rules separately on that larger set, and run the evaluation in CI so a prompt or rule change can't silently lower accuracy.
 - Add per-field confidence, so low-confidence extractions are routed to review instead of acted on.
 
 **2. Connect to a real inbox and keep history**

@@ -62,6 +62,9 @@ def main() -> None:
     print(f"Processed {len(analyses)} emails into {len(deals)} deal groups in {info['total_seconds']}s.")
     print(f"Extraction: {sources}" + (f" (fallback: {info['fallback_reasons']})" if info["fallback_reasons"] else ""))
     for name, calls in info["ai_calls"].items():
+        if name in info["ai_disabled"]:
+            print(f"{name}: skipped this run ({info['ai_disabled'][name]}); see the warning above")
+            continue
         if not calls:
             print(f"{name}: no API calls (answers came from the local cache, or it was not needed)")
             continue

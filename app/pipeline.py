@@ -199,6 +199,7 @@ def analyze_emails(
                           "response_format": c.provider.response_format} for c in clients],
         "prompt_version": PROMPT_VERSION,
         "ai_calls": {c.provider.name: c.calls for c in clients},
+        "ai_disabled": getattr(extractor, "disabled_providers", {}),
         "ai_cache_hits": extractor.stats.get("cache_hits", 0),
         "ai_tokens": {c.provider.name: dict(c.usage) for c in clients if c.usage},
         "ai_avg_latency_seconds": {c.provider.name: round(sum(c.latencies) / len(c.latencies), 2)

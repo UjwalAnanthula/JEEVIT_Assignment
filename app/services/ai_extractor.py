@@ -589,6 +589,11 @@ class EmailExtractor:
         """The primary provider's client (Groq when configured)."""
         return self.clients[0] if self.clients else None
 
+    @property
+    def disabled_providers(self) -> dict[str, str]:
+        """Providers switched off during this run, with the reason (e.g. model_unavailable)."""
+        return {name: state.disabled for name, state in self._state.items() if state.disabled}
+
     def check_model(self, client: ChatClient) -> None:
         """Fail loudly (and stop calling that provider) if its model is not served to this key."""
         state = self._state[client.provider.name]
