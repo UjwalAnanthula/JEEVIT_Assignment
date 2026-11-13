@@ -1,0 +1,37 @@
+{
+  "_meta": {
+    "purpose": "Held-out synthetic emails written after the system was built but before it was run on them. Scores are reported from the first run; the system was not tuned to these.",
+    "judgement_calls": "H-02 raises the fee and adds a story, so the deal ends as 1 reel + 3 stories. H-04 is a 5G phone, which competes with the Nova Phones smartphone exclusivity. H-11 is due one day after the reference date: still a deal, but flagged as tight. H-12's partnership ads from the creator's handle are whitelisting, and 12 months exceeds the 3 included."
+  },
+  "emails": {
+    "H-01": {"category": "deal_offer", "brand": "Kiwi Skin", "fee": 70000, "currency": "INR", "payment_type": "cash",
+             "deliverables": ["instagram:reel:1", "instagram:story:2"], "deadline": "2026-11-28",
+             "usage": {"months": 2, "perpetual": false, "whitelisting": false}, "risks": [], "action": "accept"},
+    "H-02": {"category": "deal_offer", "brand": "Kiwi Skin", "fee": 75000, "currency": "INR", "payment_type": "cash",
+             "risks": [], "action": "accept"},
+    "H-03": {"category": "not_a_fit", "brand": "CoinBazaar", "fee": 200000, "currency": "INR", "payment_type": "cash",
+             "deliverables": ["youtube:dedicated_video:1"], "deadline": null, "risks": ["prohibited_content"], "action": "decline"},
+    "H-04": {"category": "not_a_fit", "brand": "Zeta Mobile", "fee": 1000, "currency": "USD", "payment_type": "cash",
+             "deliverables": ["youtube:integration:1"], "deadline": "2027-01-15", "risks": ["exclusivity_conflict"], "action": "decline"},
+    "H-05": {"category": "scam_or_phishing", "fee": null, "risks": ["credential_phishing"], "action": "flag_for_security_review"},
+    "H-06": {"category": "deal_offer", "brand": "PagePress", "fee": 90000, "currency": "INR", "payment_type": "cash",
+             "deliverables": ["instagram:reel:2"], "deadline": "2026-12-05",
+             "usage": {"months": 1, "perpetual": false, "whitelisting": false}, "risks": [], "action": "accept"},
+    "H-07": {"category": "deal_offer", "brand": "Tickr", "fee": 5000, "currency": "INR", "payment_type": "cash_and_gifting",
+             "deliverables": ["instagram:reel:1"], "risks": ["below_rate"], "action": "negotiate"},
+    "H-08": {"category": "needs_more_info", "brand": null, "fee": null, "deliverables": [], "deadline": null,
+             "risks": [], "action": "request_more_information"},
+    "H-09": {"category": "spam", "fee": null, "risks": [], "action": "ignore"},
+    "H-10": {"category": "scam_or_phishing", "fee": null, "risks": ["upfront_payment_request"], "action": "flag_for_security_review"},
+    "H-11": {"category": "deal_offer", "brand": "QuickBite", "fee": 50000, "currency": "INR", "payment_type": "cash",
+             "deliverables": ["instagram:reel:1"], "deadline": "2026-11-13", "risks": ["deadline_tight"], "action": "accept"},
+    "H-12": {"category": "deal_offer", "brand": "GlowFit", "fee": 60000, "currency": "INR", "payment_type": "cash",
+             "deliverables": ["instagram:reel:1"], "usage": {"months": 12, "whitelisting": true},
+             "risks": ["whitelisting_requested", "usage_exceeds_included"], "action": "negotiate"}
+  },
+  "groups": [["H-01", "H-02"]],
+  "deals": {
+    "H-01": {"action": "accept", "fee": 75000, "currency": "INR",
+             "deliverables": ["instagram:reel:1", "instagram:story:3"], "deadline": "2026-11-28"}
+  }
+}

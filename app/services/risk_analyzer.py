@@ -26,6 +26,7 @@ from app.utils.helpers import (
     format_money,
     is_freemail,
     sender_domain,
+    sentence_spans,
     truncate,
 )
 
@@ -183,6 +184,29 @@ def _expand(terms: Iterable[str]) -> set[str]:
         base = _singular(term)
         out.update({term, base, *CATEGORY_SYNONYMS.get(base, ()), *CATEGORY_SYNONYMS.get(term, ())})
     return {t for t in out if t}
+
+
+_NEGATION_BEFORE = re.compile(
+    r"(?:\b(?:not|no|never|nor|without|neither)\b|n['’]t\b|\bnon-?)[\w\s,'’-]{0,25}$", re.I
+)
+_NEGATION_AFTER = re.compile(r"^\s*-?\s*free\b", re.I)  # "crypto-free", "gambling free"
+_NOT_ONLY = re.compile(r"\bnot (?:just|only|merely)\b", re.I)  # "not just a betting app" affirms
+
+
+def affirmed_match(pattern: re.Pattern[str], text: str) -> tuple[re.Match[str] | None, list[str]]:
+    """First match that is not negated ("we are not a betting app", "crypto-free"), plus negated quotes."""
+    spans = sentence_spans(text) or [(0, len(text))]
+    denials = []
+    for match in pattern.finditer(text):
+        start = next((s for s, e in spans if s <= match.start() < e), 0)
+        before = text[start: match.start()]
+        after = text[match.end(): match.end() + 15]
+        denied = _NEGATION_BEFORE.search(before) and not _NOT_ONLY.search(before)
+        if denied or _NEGATION_AFTER.search(after):
+            denials.append(truncate(text[start: next((e for s, e in spans if s <= match.start() < e), len(text))]))
+            continue
+        return match, denials
+    return None, denials
 
 
 def _keyword_pattern(terms: Iterable[str]) -> re.Pattern[str]:
@@ -376,10 +400,12 @@ def _content_rules(report: RiskReport, texts: list[tuple[str, str]], descriptors
         return
     broken = []
     for rule in policy.prohibited:
+        negated: list[tuple[str | None, str]] = []
         for email_id, text in texts + [(None, descriptors)]:
-            match = rule.pattern.search(text)
+            match, denials = affirmed_match(rule.pattern, text)
+            negated += [(email_id, d) for d in denials]
             if match:
-                quote = find_sentence(text, rule.pattern) or match.group()
+                quote = find_sentence(text, re.escape(match.group())) or match.group()
                 broken.append(rule.rule_text)
                 report.risks.append(Risk(
                     code="prohibited_content", category="content_policy", severity="high", blocking=True,
@@ -390,6 +416,15 @@ def _content_rules(report: RiskReport, texts: list[tuple[str, str]], descriptors
                     term=f"category: {match.group()}",
                     mitigation="Decline politely; this category is excluded regardless of fee."))
                 break
+        else:
+            if negated:
+                report.risks.append(Risk(
+                    code="excluded_category_negated", category="content_policy", severity="low",
+                    title="Mentions an excluded category only to deny it",
+                    explanation=f"The email says it is not related to an excluded category ('{rule.rule_text}'). "
+                                "Taken at face value, but worth a quick check of the product.",
+                    evidence=[_quote(eid, quote) for eid, quote in negated[:2]],
+                    mitigation="Check the brand's website or app listing before agreeing."))
     if broken:
         _check(report, "content_rules", "fail", "Breaks: " + "; ".join(broken))
     else:
@@ -440,7 +475,8 @@ def _exclusivity(report: RiskReport, terms: ReconciledTerms, texts: list[tuple[s
         if ex.pattern is None:
             _check(report, name, "unknown", "Exclusivity has no category, so competitors cannot be identified.")
             continue
-        hit = next(((eid, m) for eid, text in texts + [(None, descriptors)] if (m := ex.pattern.search(text))), None)
+        hit = next(((eid, m) for eid, text in texts + [(None, descriptors)]
+                    if (m := affirmed_match(ex.pattern, text)[0])), None)
         if hit is None:
             _check(report, name, "pass", f"No {ex.category} product mentioned.")
             continue

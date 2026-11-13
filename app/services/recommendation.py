@@ -97,13 +97,23 @@ def recommend(
     return Recommendation(action=action, summary=summary, reasons=_unique(reasons), next_steps=_unique(steps))
 
 
-def placeholder_reply(action: Action) -> str | None:
-    """Baseline placeholder kept until Batch 3 adds contextual drafts. Nothing is ever sent."""
-    if action == "request_more_information":
-        return "Thanks for reaching out. Please share the complete brief, timeline, deliverables and usage terms."
-    if action in ("accept", "negotiate", "review_manually"):
-        return "Thanks for the offer. Could you confirm the final scope, payment schedule and usage rights?"
-    return None
+def build_drafts_markdown(deals: list[Deal]) -> str:
+    """All draft replies in one file for the creator to copy, edit and send themselves."""
+    lines = ["# Draft replies", "", "_Drafts only. Nothing has been sent. Review and edit before sending._", ""]
+    for deal in deals:
+        draft = deal.draft_reply
+        if draft is None:
+            continue
+        lines += [f"## {deal.brand or 'Unknown sender'} [{', '.join(deal.email_ids)}] "
+                  f"({deal.recommendation.action.replace('_', ' ')})", "",
+                  f"**To:** {draft.to}  ", f"**Subject:** {draft.subject}", "", "```text", draft.body, "```", ""]
+        lines += [f"- Check: {note}" for note in draft.notes[1:]]
+        lines.append("")
+    skipped = [d for d in deals if d.draft_reply is None]
+    if skipped:
+        lines.append("No draft for: " + ", ".join(
+            f"{d.brand or 'Unknown'} ({d.recommendation.action.replace('_', ' ')})" for d in skipped) + ".")
+    return "\n".join(lines) + "\n"
 
 
 # ---------------------------------------------------------------- creator summary
@@ -145,6 +155,8 @@ def _deal_block(deal: Deal) -> list[str]:
         lines.append(f"- {risk.severity.upper()}: {risk.title}. {risk.explanation}")
     for step in rec.next_steps[:4]:
         lines.append(f"- To do: {step}")
+    if deal.draft_reply:
+        lines.append(f"- Draft reply to {deal.draft_reply.to} is ready in drafts.md.")
     return lines + [""]
 
 

@@ -1,6 +1,7 @@
 # Orchestrates extraction (Groq or rules), grouping, reconciliation, policy checks and recommendations.
 # Produces separate email-level analyses and deal-level records, then writes JSON and the Markdown summary.
 import json
+import time
 from collections import Counter
 from pathlib import Path
 from typing import NamedTuple
@@ -21,9 +22,15 @@ from app.models.schemas import (
 from app.services.ai_extractor import PROMPT_VERSION, EmailExtractor
 from app.services.deal_grouper import group_emails
 from app.services.email_parser import load_inputs
-from app.services.recommendation import build_summary, placeholder_reply, recommend
+from app.services.recommendation import build_drafts_markdown, build_summary, recommend
+from app.services.reply_generator import build_draft
 from app.services.risk_analyzer import CreatorPolicy, analyze_risks
-from app.services.rule_classifier import decide_category, detect_security_signals, is_security_threat
+from app.services.rule_classifier import (
+    decide_category,
+    detect_security_signals,
+    extract_with_rules,
+    is_security_threat,
+)
 from app.services.term_reconciler import reconcile
 
 _NON_DEALS = ("scam_or_phishing", "spam")
@@ -92,8 +99,14 @@ def analyze_emails(
     extractor = extractor or EmailExtractor(settings)
     by_id = {e.id: e for e in emails}
 
-    extractions = {e.id: extractor.extract(e) for e in emails}
     signals = {e.id: detect_security_signals(e) for e in emails}
+    extractions = {}
+    for email in emails:
+        if settings.ai_skip_threats and extractor.client and is_security_threat(signals[email.id]):
+            # No model call for detected scams: saves tokens and keeps injection payloads away from the LLM.
+            extractions[email.id] = extract_with_rules(email, fallback_reason="security_prefilter")
+        else:
+            extractions[email.id] = extractor.extract(email)
     groups = group_emails(emails, extractions, signals)
 
     analyses: dict[str, Analysis] = {}
@@ -127,7 +140,6 @@ def analyze_emails(
                 recommendation_detail=result.recommendation,
                 risk_flags=[f"{r.severity}: {r.title}" for r in result.risks],
                 recommendation=result.recommendation.action,
-                draft_reply=placeholder_reply(result.recommendation.action),
                 **_flat_fields(x),
             )
 
@@ -144,7 +156,7 @@ def analyze_emails(
         ]
         deal_signals = [s for e in members for s in signals[e.id]]
         result = assess(deal_terms, [(e, extractions[e.id]) for e in members], deal_signals, policy, related_risks)
-        deals.append(Deal(
+        deal = Deal(
             deal_id=group.deal_id,
             deal_key=group.deal_id,
             brand=deal_terms.brand,
@@ -165,9 +177,16 @@ def analyze_emails(
             risks=result.risks,
             missing_information=result.missing_information,
             recommendation=result.recommendation,
-        ))
+        )
+        # One draft per deal, addressed to the latest message; earlier emails in the thread get none.
+        latest = members[-1]
+        deal.draft_reply = build_draft(deal, latest, extractions[latest.id], policy)
+        analyses[latest.id].draft_reply = deal.draft_reply.body if deal.draft_reply else None
+        deals.append(deal)
 
     sources = Counter(x.source for x in extractions.values())
+    client = extractor.client
+    latencies = client.latencies if client else []
     run_info = {
         "reference_date": policy.today.isoformat(),
         "reference_date_source": policy.today_source,
@@ -179,7 +198,11 @@ def analyze_emails(
         "api_key_configured": settings.has_api_key,
         "model": settings.groq_model if sources.get("groq") else None,
         "prompt_version": PROMPT_VERSION,
-        "groq_http_calls": extractor.client.calls if extractor.client else 0,
+        "response_format": settings.response_format_mode if sources.get("groq") else None,
+        "groq_http_calls": client.calls if client else 0,
+        "groq_cache_hits": extractor.stats.get("cache_hits", 0),
+        "groq_tokens": dict(client.usage) if client else {},
+        "groq_avg_latency_seconds": round(sum(latencies) / len(latencies), 2) if latencies else None,
     }
     ordered = [analyses[e.id] for e in emails]  # keep input order for email-level output
     return PipelineResult(ordered, deals, run_info)
@@ -203,7 +226,11 @@ def run_pipeline(
     extractor: EmailExtractor | None = None,
 ) -> PipelineResult:
     profile, emails = load_inputs(data_dir)
+    started = time.perf_counter()
     result = analyze_emails(emails, profile, settings, extractor)
+    elapsed = time.perf_counter() - started
+    result.run_info["total_seconds"] = round(elapsed, 3)
+    result.run_info["ms_per_email"] = round(1000 * elapsed / max(len(emails), 1), 1)
     output_dir.mkdir(parents=True, exist_ok=True)
 
     def dump(name: str, payload: object) -> None:
@@ -215,4 +242,5 @@ def run_pipeline(
     (output_dir / "summary.md").write_text(
         build_summary(result.deals, result.analyses, result.run_info), encoding="utf-8"
     )
+    (output_dir / "drafts.md").write_text(build_drafts_markdown(result.deals), encoding="utf-8")
     return result

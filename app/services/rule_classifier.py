@@ -24,6 +24,7 @@ from app.utils.helpers import (
     parse_timeline,
     sender_address,
     sender_domain,
+    sentence_spans,
     split_sentences,
     truncate,
 )
@@ -126,23 +127,39 @@ _TYPE_MAP = {
 _PLATFORM_MAP = {"instagram": "instagram", "insta": "instagram", "ig": "instagram",
                  "youtube": "youtube", "yt": "youtube"}
 
+# Ad-usage phrasings that grant usage rights without saying "usage" or "rights".
+_AD_USAGE = (
+    r"(?:paid|partnership|spark|whitelist\w*|boost\w*|dark|branded content)\s+ads?\b"
+    r"|\bads?\s+(?:from|on|through|via)\s+your\s+(?:handle|account|profile|page)\b"
+    r"|\brun (?:it|them|the (?:reel|video|content|post)s?)\s+as\s+(?:\w+\s+)?ads?\b"
+)
 _USAGE_SENTENCE_RE = re.compile(
-    r"\b(usage|rights|whitelist\w*|white-list\w*|licen[cs]\w*|repurpos\w*|in perpetuity)\b", re.I
+    r"\b(usage|rights|whitelist\w*|white-list\w*|licen[cs]\w*|repurpos\w*|in perpetuity)\b|" + _AD_USAGE, re.I
 )
 _PERPETUAL_RE = re.compile(
     r"perpetu|in perpetuity|\bforever\b|\blifetime\b|unlimited (?:usage|use|duration|time)", re.I
 )
+_N = r"\d{1,2}|one|two|three|six|twelve"
+_UNIT = r"months?|weeks?|years?|days?"
 _DURATION_RE = re.compile(
-    r"(?P<n>\d{1,2}|one|two|three|six|twelve)\s*(?:-\s*)?(?P<unit>months?|weeks?|years?|days?)"
+    rf"(?P<n>{_N})\s*(?:-\s*)?(?P<unit>{_UNIT})"
     r"(?:'s)?\s+(?:of\s+)?(?:paid\s+)?(?:ads?\s+|media\s+|digital\s+)?(?:usage|use|rights|licen)"
-    r"|(?:usage|rights|licen[cs]e)\w*\s+(?:for|of)\s+(?P<n2>\d{1,2}|one|two|three|six|twelve)\s*"
-    r"(?P<unit2>months?|weeks?|years?|days?)",
+    rf"|(?:usage|rights|licen[cs]e)\w*\s+(?:for|of)\s+(?P<n2>{_N})\s*(?P<unit2>{_UNIT})"
+    # "run it as partnership ads from your handle for 12 months"
+    rf"|\b(?:ads?|whitelisting|boost(?:ing)?)\b[^.]{{0,50}}?\bfor\s+(?P<n3>{_N})\s*(?P<unit3>{_UNIT})",
     re.I,
 )
 _PAID_ADS_RE = re.compile(r"\bpaid (?:ads?|usage|media|social|advertis\w*)\b|\bads?\b|advertis", re.I)
 _WHITELIST_RE = re.compile(
     r"whitelist|white-list|allowlist|spark ads?|partnership ads?|branded content ads?|dark posts?"
-    r"|run ads (?:from|on|through) your (?:handle|account)",
+    r"|(?:run\s+)?ads?\s+(?:from|on|through|via)\s+your\s+(?:handle|account|profile|page)",
+    re.I,
+)
+# "add one more story", "plus 2 extra reels": changes to earlier deliverables, not a full restatement.
+_ADDITION_RE = re.compile(
+    r"\b(?:add|adding|plus|include|including)\s+(?P<qty>\d{1,2}|a|an|one|two|three|ek)\s+"
+    r"(?:more|extra|additional)\s+(?:(?P<plat>instagram|insta|ig|youtube|yt)\s+)?"
+    r"(?P<type>reels?|stories|story|posts?|shorts?|integrations?|shout-?outs?|videos?)\b",
     re.I,
 )
 _ALL_MEDIA_RE = re.compile(
@@ -226,6 +243,21 @@ def extract_deliverables(text: str) -> tuple[list[Deliverable], list[str]]:
     return found, notes
 
 
+def extract_additions(text: str) -> list[Deliverable]:
+    """Deliverables added on top of earlier terms ("add one more story")."""
+    found = []
+    for m in _ADDITION_RE.finditer(text):
+        kind = _TYPE_MAP[m.group("type").lower()]
+        platform = _PLATFORM_MAP.get((m.group("plat") or "").lower()) or (
+            "instagram" if kind in ("reel", "story", "post") else "unknown")
+        found.append(Deliverable(platform=platform, type=kind, quantity=_quantity(m.group("qty"))))
+    return found
+
+
+def _sentence_at(text: str, pos: int) -> str:
+    return next((text[s:e] for s, e in sentence_spans(text) if s <= pos < e), text)
+
+
 def _months(n: str, unit: str) -> float:
     qty = float(n) if n.isdigit() else float({"one": 1, "two": 2, "three": 3, "six": 6, "twelve": 12}[n.lower()])
     unit = unit.lower().rstrip("s")
@@ -240,7 +272,8 @@ def extract_usage_rights(text: str) -> UsageRights | None:
     duration = None
     m = _DURATION_RE.search(joined)
     if m:
-        duration = _months(m.group("n") or m.group("n2"), m.group("unit") or m.group("unit2"))
+        duration = _months(m.group("n") or m.group("n2") or m.group("n3"),
+                           m.group("unit") or m.group("unit2") or m.group("unit3"))
     return UsageRights(
         raw_text=truncate(joined, 400),
         duration_months=duration,
@@ -287,9 +320,16 @@ def extract_with_rules(email: EmailRecord, fallback_reason: str | None = None) -
     if not deliverables:
         deliverables, notes = extract_deliverables(email.subject)
     uncertainties.extend(notes)
+    additions = extract_additions(body)
 
-    money = find_money(body) or find_money(email.subject)
-    paid = [m for m in money if m.kind == "compensation"]
+    money_text = body if find_money(body) else email.subject
+    money = find_money(money_text)
+    paid = []
+    for mention in (m for m in money if m.kind == "compensation"):
+        if _INJECTION_RE.search(_sentence_at(money_text, mention.start)):
+            uncertainties.append(f"Amount {mention.raw} appears inside instructions aimed at an AI; not an offer.")
+        else:
+            paid.append(mention)
     distinct = list(dict.fromkeys((m.amount, m.currency) for m in paid))
     compensation = None
     if distinct:
@@ -352,6 +392,7 @@ def extract_with_rules(email: EmailRecord, fallback_reason: str | None = None) -
         campaign_name=campaign,
         product=product,
         deliverables=deliverables,
+        deliverable_additions=additions,
         compensation=compensation,
         payment_type=payment_type,
         product_value=product_value,
@@ -423,9 +464,20 @@ _INJECTION_RE = re.compile(
     r"|\bdisregard (?:your|the|all|any) (?:rules|instructions|guidelines|policies)\b"
     r"|\bclassify this (?:email|message)\b|\b(?:system|developer) prompt\b"
     r"|\byou are (?:now )?(?:an?|the) (?:ai|assistant|language model)\b"
-    r"|\breveal (?:your|the) (?:prompt|instructions|api key|system)\b",
+    r"|\breveal (?:your|the) (?:prompt|instructions|api key|system)\b"
+    # Broader phrasings: conditional addressing, overrides, fake role blocks, verdict steering.
+    r"|\bif you(?:'re| are) (?:an? )?(?:ai|assistant|bot|language model|llm|chatbot)\b"
+    r"|\b(?:override|bypass|forget|ignore|disregard)\s+(?:all\s+|any\s+)?(?:of\s+)?"
+    r"(?:your\s+|the\s+|previous\s+|prior\s+|above\s+|earlier\s+|system\s+)*"
+    r"(?:instructions|prompts?|guardrails|safety (?:rules|filters)|content filters)\b"
+    r"|(?:^|\n)\s*(?:\[|<|###\s*)(?:system|assistant|developer)\s*(?:\]|>|:)"
+    r"|(?:^|\n)\s*system\s*:"
+    r"|\bmark (?:this|the) (?:email|message|sender) as (?:safe|legit\w*|verified|trusted)\b"
+    r"|\b(?:pretend|act) (?:to be|as|you are) (?:an? |the )?(?:admin|administrator|system|developer)\b"
+    r"|\b(?:deal_offer|needs_more_info|not_a_fit|scam_or_phishing)\b",
     re.I,
 )
+_HIDDEN_CONTENT_RE = re.compile(r"<!--.*?-->|[​-‏⁠﻿]", re.S)
 _PERSONAL_DATA_STRONG_RE = re.compile(
     r"\b(?:home|residential|personal) address\b|\bpersonal (?:phone|mobile|number|email)\b"
     r"|\b(?:otp|one[- ]time password|upi pin|cvv|password|aadh?aa?r)\b",
@@ -492,6 +544,11 @@ def detect_security_signals(email: EmailRecord) -> list[SecuritySignal]:
         signals.append(_signal("financial_data_request", "weak",
                                "Requests bank or PAN details; share only after a contract is verified.",
                                text, _PERSONAL_DATA_WEAK_RE))
+    if _HIDDEN_CONTENT_RE.search(text):
+        signals.append(SecuritySignal(
+            code="hidden_content", strength="weak",
+            explanation="Contains hidden text (HTML comments or zero-width characters), a common way to smuggle instructions.",
+            evidence="Hidden characters or comment found in the email body."))
     if _URGENCY_RE.search(text):
         signals.append(_signal("urgency_pressure", "weak", "Uses urgency or a short expiry to pressure a decision.",
                                text, _URGENCY_RE))

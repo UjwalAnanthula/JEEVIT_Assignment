@@ -19,7 +19,7 @@ def test_sample_inbox(tmp_path):
 def test_categories_match_hand_labels(tmp_path):
     expected = json.loads((ROOT / "evaluation" / "expected_results.json").read_text(encoding="utf-8"))
     analyses, _ = run(ROOT / "data", tmp_path)
-    assert {a.email_id: a.category for a in analyses} == expected
+    assert {a.email_id: a.category for a in analyses} == {k: v["category"] for k, v in expected["emails"].items()}
 
 
 def test_dew_lab_deal_reconciles_latest_terms(tmp_path):
@@ -56,7 +56,7 @@ def test_cli_runs_offline(tmp_path, monkeypatch, capsys):
     monkeypatch.setattr(sys, "argv", ["app.main", "--data", str(ROOT / "data"), "--output", str(tmp_path), "--no-ai"])
     main()
     out = capsys.readouterr().out
-    assert "Processed 15 emails into 13 deal groups." in out and "rules=15" in out
+    assert "Processed 15 emails into 13 deal groups" in out and "rules=15" in out
 
 
 def test_classify_compat_wrapper(inbox, profile):

@@ -157,6 +157,8 @@ class Extraction(BaseModel):
     product: str | None = None
     product_category: str | None = None
     deliverables: list[Deliverable] = Field(default_factory=list)
+    # Items added on top of earlier terms ("add one more story"); applied during reconciliation.
+    deliverable_additions: list[Deliverable] = Field(default_factory=list)
     compensation: Money | None = None
     payment_type: PaymentType = "unknown"
     product_value: Money | None = None
@@ -264,6 +266,15 @@ class Recommendation(BaseModel):
     next_steps: list[str] = Field(default_factory=list)
 
 
+class DraftReply(BaseModel):
+    """A reply for the creator to review and send themselves. Never sent automatically."""
+
+    to: str
+    subject: str
+    body: str
+    notes: list[str] = Field(default_factory=list)  # what the creator should check before sending
+
+
 class Assessment(BaseModel):
     category: Category
     rate_check: RateCheck | None = None
@@ -344,3 +355,4 @@ class Deal(BaseModel):
     risks: list[Risk] = Field(default_factory=list)
     missing_information: list[str] = Field(default_factory=list)
     recommendation: Recommendation
+    draft_reply: DraftReply | None = None

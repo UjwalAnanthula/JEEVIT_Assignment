@@ -1,7 +1,44 @@
 {
-  "E-01": "deal_offer", "E-02": "deal_offer", "E-03": "scam_or_phishing",
-  "E-04": "not_a_fit", "E-05": "not_a_fit", "E-06": "deal_offer",
-  "E-07": "scam_or_phishing", "E-08": "needs_more_info", "E-09": "deal_offer",
-  "E-10": "deal_offer", "E-11": "deal_offer", "E-12": "not_a_fit",
-  "E-13": "spam", "E-14": "scam_or_phishing", "E-15": "needs_more_info"
+  "_meta": {
+    "purpose": "Hand-written expected answers for the 15 supplied emails, written from reading the emails, not from system output.",
+    "conventions": "A missing key is not scored. null means 'not stated in the email' and is scored (a value there counts as fabrication). Deliverables are platform:type:quantity. Deadline is the last allowed date (ISO), or 'relative'.",
+    "judgement_calls": "E-06 states '25k' with no currency, so currency is null even though INR is likely. E-11 does not name Instagram, but its reels and stories are the same Dew Lab campaign as E-01. E-01's email-level action is accept because 1,20,000 met the rate when it arrived."
+  },
+  "emails": {
+    "E-01": {"category": "deal_offer", "brand": "Dew Lab", "fee": 120000, "currency": "INR", "payment_type": "cash",
+             "deliverables": ["instagram:reel:2", "instagram:story:3"], "deadline": "2026-11-25",
+             "usage": {"months": 3, "perpetual": false, "whitelisting": false}, "risks": [], "action": "accept"},
+    "E-02": {"category": "deal_offer", "brand": "Dew Lab", "fee": 100000, "currency": "INR", "payment_type": "cash",
+             "deliverables": [], "deadline": null, "risks": ["below_rate"], "action": "negotiate"},
+    "E-03": {"category": "scam_or_phishing", "fee": null, "risks": ["upfront_payment_request"], "action": "flag_for_security_review"},
+    "E-04": {"category": "not_a_fit", "brand": "Pixelon", "fee": 1200, "currency": "USD", "payment_type": "cash",
+             "deliverables": ["youtube:integration:1"], "deadline": "2026-12-10", "risks": ["exclusivity_conflict"], "action": "decline"},
+    "E-05": {"category": "not_a_fit", "brand": "LuckyPlay11", "fee": 300000, "currency": "INR", "payment_type": "cash",
+             "deliverables": ["instagram:reel:2", "youtube:shoutout:1"], "deadline": null, "risks": ["prohibited_content"], "action": "decline"},
+    "E-06": {"category": "deal_offer", "brand": "Chai & Co", "fee": 25000, "currency": null, "payment_type": "cash",
+             "deliverables": ["instagram:reel:1"], "deadline": null, "risks": ["below_rate"], "action": "negotiate"},
+    "E-07": {"category": "scam_or_phishing", "fee": null, "risks": ["prompt_injection"], "action": "flag_for_security_review"},
+    "E-08": {"category": "needs_more_info", "brand": "Urban Thread", "fee": null, "deliverables": [], "deadline": null,
+             "risks": [], "action": "request_more_information"},
+    "E-09": {"category": "deal_offer", "brand": "BrewBox", "fee": null, "payment_type": "gifting",
+             "deliverables": ["instagram:reel:1", "instagram:story:2"], "deadline": "relative", "risks": ["barter_only"], "action": "negotiate"},
+    "E-10": {"category": "deal_offer", "brand": "AuralBuds", "fee": 800, "currency": "USD", "payment_type": "cash",
+             "deliverables": ["instagram:reel:1"], "deadline": "2026-11-30", "usage": {"perpetual": true, "whitelisting": true},
+             "risks": ["usage_perpetual", "whitelisting_requested"], "action": "negotiate"},
+    "E-11": {"category": "deal_offer", "brand": "Dew Lab", "fee": 100000, "currency": "INR", "payment_type": "cash",
+             "deliverables": ["instagram:reel:2", "instagram:story:3"], "deadline": "2026-11-25",
+             "usage": {"months": 3, "perpetual": false, "whitelisting": false},
+             "risks": ["below_rate", "agency_unverified"], "action": "negotiate"},
+    "E-12": {"category": "not_a_fit", "brand": "SnapMeal", "fee": 45000, "currency": "INR", "payment_type": "cash",
+             "deliverables": ["instagram:reel:1"], "deadline": "2026-11-01", "risks": ["deadline_expired"], "action": "decline"},
+    "E-13": {"category": "spam", "fee": null, "risks": [], "action": "ignore"},
+    "E-14": {"category": "scam_or_phishing", "fee": null, "risks": ["platform_impersonation", "credential_phishing"], "action": "flag_for_security_review"},
+    "E-15": {"category": "needs_more_info", "brand": "FitNest", "fee": null, "deliverables": [], "deadline": null,
+             "risks": [], "action": "request_more_information"}
+  },
+  "groups": [["E-01", "E-02", "E-11"]],
+  "deals": {
+    "E-01": {"action": "negotiate", "fee": 100000, "currency": "INR",
+             "deliverables": ["instagram:reel:2", "instagram:story:3"], "deadline": "2026-11-25"}
+  }
 }

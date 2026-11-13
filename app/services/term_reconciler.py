@@ -3,6 +3,7 @@
 from typing import Any, get_args
 
 from app.models.schemas import (
+    Deliverable,
     EmailRecord,
     Extraction,
     Money,
@@ -71,6 +72,36 @@ def _describe(name: str, value: Any) -> str:
     return str(value)
 
 
+def _apply_additions(state: dict[str, dict[str, Any]], email: EmailRecord, additions: list[Deliverable]) -> None:
+    """'Add one more story' increases the matching item (or appends it); recorded as an explicit revision."""
+    existing = state.get("deliverables")
+    merged = [d.model_copy() for d in (existing["value"] if existing else [])]
+    for extra in additions:
+        target = next((d for d in merged if d.type == extra.type
+                       and (d.platform == extra.platform or "unknown" in (d.platform, extra.platform))), None)
+        if target is not None and target.quantity and extra.quantity:
+            target.quantity += extra.quantity
+        else:
+            merged.append(extra)
+    event = {"email_id": email.id, "received_at": email.received_at, "value": merged,
+             "change_type": "revised" if existing else "stated"}
+    state["deliverables"] = {
+        "value": merged,
+        "source_email_id": email.id,
+        "source_received_at": email.received_at,
+        "status": event["change_type"],
+        "history": (existing["history"] if existing else []) + [event],
+    }
+    platforms = sorted({d.platform for d in merged if d.platform not in ("unknown", "other")})
+    previous = state.get("platforms")
+    if platforms and (previous is None or previous["value"] != platforms):
+        state["platforms"] = {
+            "value": platforms, "source_email_id": email.id, "source_received_at": email.received_at,
+            "status": "revised" if previous else "stated",
+            "history": (previous["history"] if previous else []) + [{**event, "value": platforms}],
+        }
+
+
 def _term_model(name: str) -> type:
     annotation = ReconciledTerms.model_fields[name].annotation
     return next(arg for arg in get_args(annotation) if arg is not type(None))
@@ -93,6 +124,8 @@ def reconcile(
             ambiguities.append(f"{prev.id} and {email.id} have the same timestamp; order between them is uncertain.")
         x = extractions[email.id]
         if email.id in excluded:
+            # Keep the claimed sender for display only; never let it replace a legitimate brand.
+            identity["brand"] = identity["brand"] or x.brand
             ambiguities.append(f"{email.id} was flagged as suspicious; its terms were not applied.")
             continue
 
@@ -139,6 +172,9 @@ def reconcile(
                     "status": change,
                     "history": history,
                 }
+
+        if x.deliverable_additions:
+            _apply_additions(state, email, x.deliverable_additions)
 
     return ReconciledTerms(
         as_of_email_id=ordered[-1].id if ordered else None,

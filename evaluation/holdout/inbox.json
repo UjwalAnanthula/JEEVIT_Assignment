@@ -1,0 +1,88 @@
+[
+  {
+    "id": "H-01",
+    "received_at": "2026-11-02 11:00",
+    "from": "hello@kiwiskin.co",
+    "subject": "Kiwi Skin x Riya - sunscreen launch",
+    "message_id": "<launch-1@kiwiskin.co>",
+    "body": "Hi Riya, Kiwi Skin here! We're launching our mineral sunscreen and would like 1 Instagram reel and 2 stories. We can offer ₹70,000. Posting window 20-28 November. 2 months usage for ads. - Meera"
+  },
+  {
+    "id": "H-02",
+    "received_at": "2026-11-05 15:30",
+    "from": "meera@kiwiskin.co",
+    "subject": "Updated budget",
+    "in_reply_to": "<launch-1@kiwiskin.co>",
+    "body": "Quick update Riya: we can increase the budget to ₹75,000 if you add one more story. Everything else stays the same. - Meera"
+  },
+  {
+    "id": "H-03",
+    "received_at": "2026-11-06 10:00",
+    "from": "creators@coinbazaar.io",
+    "subject": "Sponsored video opportunity",
+    "body": "Hey Riya, we're CoinBazaar, India's fastest-growing crypto exchange. We'd pay Rs 2 lakh for 1 dedicated YouTube video about trading on our app."
+  },
+  {
+    "id": "H-04",
+    "received_at": "2026-11-07 12:00",
+    "from": "partners@zetamobile.com",
+    "subject": "Zeta X launch",
+    "body": "Hi Riya, Zeta Mobile is launching the Zeta X, our new 5G phone. We'd like 1 YouTube integration for $1,000, live by 15 January."
+  },
+  {
+    "id": "H-05",
+    "received_at": "2026-11-08 21:40",
+    "from": "security@lnstagram-help.com",
+    "subject": "Your account was reported",
+    "body": "We received multiple reports about your account @riya.creates. Log in here to avoid deactivation: https://lnstagram-help.com/login"
+  },
+  {
+    "id": "H-06",
+    "received_at": "2026-11-09 09:15",
+    "from": "team@pagepress.in",
+    "subject": "Paid collab with PagePress",
+    "body": "Hi Riya, PagePress (premium stationery) would love 2 Instagram reels for INR 90,000 total. Payment: 50% advance and 50% on posting. Live by 5 December. Usage rights for 1 month on our own handle only."
+  },
+  {
+    "id": "H-07",
+    "received_at": "2026-11-09 13:00",
+    "from": "hi@tickr.in",
+    "subject": "Smartwatch review?",
+    "body": "Hi Riya, we're Tickr. We can pay INR 5,000 plus our new smartwatch (worth INR 12,000) for 1 Instagram reel reviewing it."
+  },
+  {
+    "id": "H-08",
+    "received_at": "2026-11-10 18:00",
+    "from": "bluedoor.cafe@gmail.com",
+    "subject": "Collab?",
+    "body": "Hi Riya, hum ek naya cafe khol rahe hain Bangalore mein. Collab karna hai? Details baad mein share karenge."
+  },
+  {
+    "id": "H-09",
+    "received_at": "2026-11-10 08:00",
+    "from": "offers@kicksvilla.com",
+    "subject": "Flat 40% off this weekend",
+    "body": "Flat 40% off on all sneakers this weekend only! Shop now at our store. Unsubscribe from these emails anytime."
+  },
+  {
+    "id": "H-10",
+    "received_at": "2026-11-11 10:30",
+    "from": "partners@influencegrid.net",
+    "subject": "Welcome to InfluenceGrid",
+    "body": "Hi Riya, brands love your profile! To confirm your slot in our creator network, a refundable onboarding deposit of ₹1,500 is required. Paid campaigns follow."
+  },
+  {
+    "id": "H-11",
+    "received_at": "2026-11-11 16:00",
+    "from": "growth@quickbite.in",
+    "subject": "Reel this week?",
+    "body": "Hi Riya, QuickBite needs 1 Instagram reel live by 13 November. Budget INR 50,000."
+  },
+  {
+    "id": "H-12",
+    "received_at": "2026-11-12 08:30",
+    "from": "brand@glowfit.in",
+    "subject": "Reel + ads",
+    "body": "Hi Riya, GlowFit would like 1 Instagram reel for INR 60,000. We'd like to run it as partnership ads from your handle for 12 months."
+  }
+]

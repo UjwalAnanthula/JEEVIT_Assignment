@@ -1,7 +1,11 @@
-# Runs the stateless pipeline container and mounts input/output folders.
+# Runs the pipeline container with data mounted read-only; GROQ_* settings come from .env at runtime.
+# Without a .env file the container runs on deterministic rules only.
 services:
   jeevit-assistant:
     build: .
+    env_file:
+      - path: .env
+        required: false
     volumes:
       - ./data:/app/data:ro
       - ./output:/app/output

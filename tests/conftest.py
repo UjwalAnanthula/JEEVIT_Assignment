@@ -73,6 +73,7 @@ class StubExtractor:
     def __init__(self, extractions: dict[str, Extraction]) -> None:
         self.extractions = extractions
         self.client = None
+        self.stats: dict[str, int] = {}
 
     def extract(self, email: EmailRecord) -> Extraction:
         return self.extractions[email.id]
