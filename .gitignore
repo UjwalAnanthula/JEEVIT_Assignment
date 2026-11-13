@@ -1,0 +1,8 @@
+# Keeps local secrets, environments, caches and generated files out of Git.
+.env
+.venv/
+__pycache__/
+.pytest_cache/
+*.py[cod]
+output/*
+!output/.gitkeep

@@ -1,0 +1,7 @@
+{
+  "E-01": "deal_offer", "E-02": "deal_offer", "E-03": "scam_or_phishing",
+  "E-04": "not_a_fit", "E-05": "not_a_fit", "E-06": "deal_offer",
+  "E-07": "scam_or_phishing", "E-08": "needs_more_info", "E-09": "deal_offer",
+  "E-10": "deal_offer", "E-11": "deal_offer", "E-12": "not_a_fit",
+  "E-13": "spam", "E-14": "scam_or_phishing", "E-15": "needs_more_info"
+}

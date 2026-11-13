@@ -1,0 +1,7 @@
+# Runs the stateless pipeline container and mounts input/output folders.
+services:
+  jeevit-assistant:
+    build: .
+    volumes:
+      - ./data:/app/data:ro
+      - ./output:/app/output
