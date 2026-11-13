@@ -3,6 +3,7 @@
 .venv/
 __pycache__/
 .pytest_cache/
+.cache/
 *.py[cod]
 output/*
 !output/.gitkeep
