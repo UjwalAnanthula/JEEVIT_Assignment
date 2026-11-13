@@ -75,6 +75,8 @@ inbox.json -> security scan (code) -> extraction (Groq, or rules fallback) -> gr
 
 **Model choice.** `llama-3.3-70b-versatile` became Enterprise-only on Groq (checked Nov 2026), so the default is the free-tier `openai/gpt-oss-20b`. It runs with strict `json_schema` output, `reasoning_effort=low` and reasoning excluded. A preflight check against `/models` fails loudly instead of silently falling back.
 
+**Why one AI provider, not a chain (Groq → Gemini → OpenRouter).** The deterministic fallback already guarantees the tool always produces an answer. Adding a second LLM provider would make results depend on which model happened to answer, so each would need its own evaluation. It would also mean another API key and another third party receiving the creator's email. One measured model plus rules keeps accuracy known and reproducible. A backup provider is a reasonable production addition once it has its own evaluation.
+
 ## The tricky emails
 
 | Email | Result | Why |
