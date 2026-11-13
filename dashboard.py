@@ -1,5 +1,5 @@
 # Streamlit dashboard: overview cards, views bar, full-width deal list, and a detail page with a Back button.
-# Run: streamlit run dashboard.py  ->  http://localhost:8501   (read-only; drafts are never sent)
+# Run: python -m streamlit run dashboard.py  ->  http://localhost:8501   (read-only; drafts are never sent)
 from datetime import date
 from pathlib import Path
 

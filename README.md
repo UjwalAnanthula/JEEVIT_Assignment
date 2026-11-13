@@ -1,10 +1,10 @@
 # JEEVIT: Brand Deal Inbox Assistant
 
-Reads a creator's brand inbox and tells them, for every email and every deal: **what it is, what the deal actually says, what's risky, and what to do next**, with a draft reply where a reply makes sense. Nothing is ever sent.
+Reads a creator's brand inbox and tells them, for every email and deal, **what it is, what the deal says, what's risky and what to do next**, with a draft reply where one makes sense. Nothing is ever sent.
 
-It runs fully offline on deterministic rules. When API keys are configured it uses an LLM for extraction: **Groq first, Gemini if Groq fails, rules if both fail**.
+It works offline using deterministic rules. With API keys set, it uses an LLM for extraction: **Groq first, then Gemini, then rules**.
 
-## Quick start (fresh clone)
+## Quick start
 
 ```bash
 git clone https://github.com/UjwalAnanthula/JEEVIT_Assignment.git
@@ -15,7 +15,22 @@ pip install -r requirements.txt
 python -m app.main              # no key needed: deterministic rules
 ```
 
-Optional AI extraction:
+Results go to `output/`. Start with `summary.md` (what needs attention today), then `drafts.md` (reply drafts). `deals.json` and `analyses.json` hold the full records, with evidence and term history. `run_info.json` records provenance, timing and token usage.
+
+### Dashboard
+
+```bash
+python -m streamlit run dashboard.py   # opens http://localhost:8501
+```
+
+A read-only view of the same results:
+- It opens on **Needs attention**. The tabs switch to All emails, Decline, Scam warnings or Ignored.
+- Click a row to see the deal's next step, terms checked against your rate, risks with evidence, suggested actions and a draft reply you can copy. **← Back** returns to the list.
+- The **Analysis** menu switches between rules and AI (when keys are set) and re-runs the analysis.
+
+It runs on localhost only and sends no usage statistics. Email text is shown as plain text, so phishing links are never clickable.
+
+### Optional: AI extraction
 
 ```bash
 copy .env.example .env          # macOS/Linux: cp .env.example .env
@@ -24,47 +39,13 @@ python -m app.main --check-ai   # one live call per configured provider
 python -m app.main              # per email: Groq -> Gemini -> rules
 ```
 
-Other commands:
+### Other commands
 
 | Command | What it does |
 |---|---|
-| `streamlit run dashboard.py` | Local dashboard at **http://localhost:8501** (see below) |
-| `python -m pytest -q` | 119 offline tests (HTTP is mocked; real network is blocked in tests) |
-| `python -m evaluation.evaluate` | Scores against hand-written answers; writes `output/evaluation.md` |
-| `python -m app.main --no-ai` | Force rules only |
-
-**Outputs** (in `output/`): start with `summary.md` (what needs attention today), then `drafts.md` (reply drafts). `deals.json` and `analyses.json` hold the full structured records, including evidence and term history. `run_info.json` records provenance, timing and token usage.
-
-### Dashboard (optional)
-
-`streamlit run dashboard.py` opens **http://localhost:8501**. It's a read-only view of the same pipeline, with two pages.
-
-**List page** (top to bottom):
-
-| Area | Shows |
-|---|---|
-| **Overview cards** | Inbox overview (emails, deals, need attention, scam warnings) · emails by category · which source extracted them |
-| **Views bar** | All emails · Needs attention · Decline · Scam warnings · Ignored, each with its count. It opens on **Needs attention**. |
-| **List** | One full-width row per deal (or email): brand, recommendation, fee and deliverables, next step and risk count. Search filters by brand, subject or email ID. |
-
-**Detail page.** Clicking a row opens it full width, with **← Back** at the top; the overview cards and views bar are hidden here to keep the focus on the deal. It shows:
-- the next step and category;
-- a terms grid: fee against your rate, deliverables, platform, dates, usage and payment terms;
-- risks with severity and evidence;
-- suggested actions;
-- the suggested reply, copyable and marked as a draft;
-- **Deal details**: where each term came from, how it changed, and why the emails were grouped.
-
-An email from **All emails** opens as a reader with its extracted fields and a link to its deal.
-
-The **Analysis** menu in the header switches between rules only and AI (Groq → Gemini → rules) when keys are configured, and has **Re-run analysis**. AI answers are cached, so the first AI run is the slow one.
-
-The UI lives in `dashboard.py` (layout and state), `ui/components.py` (HTML building blocks) and `ui/theme.css` (design tokens), with matching theme values in `.streamlit/config.toml`. It only presents the pipeline's existing results.
-
-The dashboard:
-- shows email text as plain text, so links in phishing emails are never clickable;
-- listens on localhost only;
-- sends no usage statistics to Streamlit.
+| `python -m pytest -q` | 119 offline tests (network is blocked in tests) |
+| `python -m evaluation.evaluate` | Scores the system against hand-written answers and writes `output/evaluation.md`. Add `--ai` to score the live model. |
+| `python -m app.main --no-ai` | Rules only, even when keys are set |
 
 ## What the creator sees (excerpt from `summary.md`)
 
@@ -74,69 +55,60 @@ The dashboard:
 > - MEDIUM: Agency authority not verified. Brightside Agency (brightside-agency.com) says it represents Dew Lab. Earlier brand emails came from dewlab.in. It asks: 'Please send your GST details and confirm.'
 > - To do: Counter at INR 1,10,000 or more ... Confirm with Dew Lab directly before sharing GST details.
 
-## Design: what the model does, what plain code does
+## Design
 
 ```
-inbox.json -> security scan (code) -> extraction (Groq -> Gemini -> rules) -> grouping (code)
-           -> term reconciliation (code) -> creator-policy checks (code) -> category + action (code)
-           -> draft reply (code templates) -> summary.md / drafts.md / deals.json
+inbox.json -> security scan -> extraction (Groq -> Gemini -> rules) -> grouping -> term reconciliation
+           -> creator-policy checks -> category + next step -> draft reply -> summary.md / drafts.md / deals.json
 ```
+
+Only the extraction step uses a model. Everything else is plain code.
 
 | Step | Who | Why |
 |---|---|---|
-| Read messy text into fields: brand, agency, deliverables, fee, currency, dates, usage wording | **Groq** (`openai/gpt-oss-20b`), else **Gemini** (`gemini-3.5-flash-lite`), else rules | Language is varied (Hinglish, paraphrase, agencies). This is where a model helps. |
-| Scam/phishing/injection detection | **Code** | Must not be fooled by the very text it is judging. |
-| Grouping emails into deals; "latest terms" | **Code** | Needs to be explainable: every merge records its evidence. |
-| Rates, currency conversion, exclusivity, content rules, deadlines, usage rights | **Code** | Arithmetic and policy must be exactly right and testable. |
-| Category, next action, draft replies | **Code** | The model can never accept a deal, lower a security verdict or invent terms in a reply. |
+| Read messy text into fields (brand, agency, deliverables, fee, currency, dates, usage) | **Groq** `openai/gpt-oss-20b`, else **Gemini** `gemini-3.5-flash-lite`, else rules | The wording varies (Hinglish, paraphrase, agencies), and that is where a model helps. |
+| Scam, phishing and injection detection | Code | It must not be fooled by the text it is judging. |
+| Grouping emails into deals; latest terms | Code | Every merge records its evidence. |
+| Rates, currency, exclusivity, content rules, deadlines, usage rights | Code | Arithmetic and policy must be exact and testable. |
+| Category, next step, draft replies | Code | The model can never accept a deal, lower a security verdict or invent terms. |
 
-**Safety rules for untrusted email:**
-- The email is fenced as data with an unguessable marker the email can't spoof.
-- Output must match a strict JSON schema and is validated again with Pydantic.
-- Any fee or currency the model reports that isn't literally in the email is discarded.
-- Emails that code already flags as scams are **never sent to the model**.
-- The creator profile is **never sent to the model**.
-- The model's opinion can only *add caution* (an "accept" becomes "review manually"). It can never change a category.
-- **Deterministic floor:** the model cannot drop a signal plain code reads from the same text (collaboration intent, explicit revision wording, a stated currency, usage/whitelisting flags). This was added after the first live run; see Evaluation.
+**Safety with untrusted email**
+- The email is fenced as data with a random marker the email can't spoof.
+- The model's output must match a strict JSON schema and is validated again with Pydantic.
+- If the model reports a fee or currency that isn't in the email, it is discarded.
+- Emails already flagged as scams are never sent to the model, and neither is the creator profile.
+- The model can only add caution. It can never change a category.
+- **Deterministic floor:** the model can't drop a signal that plain code reads from the same text: collaboration intent, revision wording, a stated currency, usage or whitelisting terms.
 
-**Fallback chain and provenance.** For each email, the configured providers are tried in order: Groq, then Gemini (both through their OpenAI-compatible APIs), then the deterministic rules. A provider without a key is skipped. Each email records which source answered (`groq`, `gemini` or `rules`) and why earlier ones failed, e.g. `groq:rate_limited` or `groq:timeout; gemini:invalid_json`. The client:
+**Fallback.** Each email goes to Groq, then Gemini (both through their OpenAI-compatible APIs), then rules. A provider without a key is skipped. Each email records which source answered and why earlier ones failed, e.g. `groq:rate_limited`. The client:
 - retries using `retry-after`;
-- paces itself on Groq's rate-limit headers (the free tier allows 8K tokens/min);
-- stops calling a provider after auth, missing-model or daily-limit errors, so later emails go straight to the next one;
-- caches validated output per provider and model.
+- paces itself using Groq's rate-limit headers;
+- stops calling a provider after an auth, missing-model or daily-limit error;
+- caches validated output.
 
-The same safety rules, grounding and deterministic floor apply whichever provider answers. Both models share the strict JSON schema.
+To test the fallback, Groq was pointed at a model that doesn't exist. Groq was skipped and Gemini answered every email.
 
-**Model choice.** `llama-3.3-70b-versatile` became Enterprise-only on Groq (checked Nov 2026), so the default is the free-tier `openai/gpt-oss-20b` with strict `json_schema` output and low reasoning effort. Gemini's fallback default is the stable `gemini-3.5-flash-lite` (`gemini-2.5-flash` is deprecated). Both are configurable in `.env`. A preflight check against each provider's `/models` fails loudly instead of silently falling back.
-
-**Trade-off.** When Gemini answers instead of Groq, results can differ slightly, which is why provenance records the provider per email. Both were evaluated live (see Evaluation). The fallback was tested by pointing Groq at a model that doesn't exist: the model check flagged it, Groq was skipped, and Gemini answered every email.
+**Model choice.** `llama-3.3-70b-versatile` is Enterprise-only on Groq (checked Nov 2026), so the default is the free-tier `openai/gpt-oss-20b`, with strict JSON output and low reasoning effort. Gemini's default is `gemini-3.5-flash-lite`. Both can be changed in `.env`. Before the first call, each model is checked against its provider's `/models` list, so a wrong name fails loudly.
 
 ## The tricky emails
 
 | Email | Result | Why |
 |---|---|---|
-| E-01, E-02, E-11 | One Dew Lab deal → **negotiate** | E-02 is the same subject thread. E-11 is the same brand and campaign ("SPF serum"). Latest fee is ₹1,00,000 (E-02, confirmed by E-11) vs a ₹1,10,000 rate; the history keeps E-01's ₹1,20,000. The agency is a different domain, so verify it before sending GST details. |
-| E-03 | **Scam** | Asks the creator to pay a registration fee; breaks "Never pays to join". |
-| E-04 | **Decline** | Smartphone campaign before 31 Jan 2027 conflicts with the Nova Phones exclusivity. The draft doesn't name the partner. |
+| E-01, E-02, E-11 | One Dew Lab deal → **negotiate** | E-02 is in the same subject thread; E-11 has the same brand and campaign ("SPF serum"). The latest fee is ₹1,00,000 (E-02, confirmed by E-11) against a ₹1,10,000 rate; the history keeps E-01's ₹1,20,000. The agency writes from a different domain, so verify it before sending GST details. |
+| E-03 | **Scam** | Asks the creator to pay a registration fee, which breaks the profile's "Never pays to join" rule. |
+| E-04 | **Decline** | A smartphone campaign before 31 Jan 2027 conflicts with the Nova Phones exclusivity. The draft doesn't name the partner. |
 | E-05 | **Decline** | Fantasy cricket matches the "No … fantasy-sports" rule. ₹3 lakh doesn't override it. |
-| E-06 | **Negotiate** | "Budget 25k" has no currency. It is kept as *unknown*, compared as INR with that assumption shown, and the draft asks to confirm. |
-| E-07 | **Scam** | Prompt injection and a request for home address/phone. Its "₹5,00,000" is never treated as a fee. |
-| E-09 | **Negotiate** | Product worth ₹3,500 for content worth ₹60,000 at base rates; gifting is not cash. |
-| E-10 | **Negotiate** | The fee meets the rate (USD 800 = ₹67,200 at the profile's 84), but perpetual + all-media + whitelisting go beyond the 3 months included. |
-| E-12 | **Decline** | Due 1 Nov; the reference date is the profile's `today` (12 Nov), not the machine clock. |
+| E-06 | **Negotiate** | "Budget 25k" has no currency. It is compared as INR, the assumption is shown, and the draft asks the brand to confirm. |
+| E-07 | **Scam** | Prompt injection plus a request for home address and phone. Its "₹5,00,000" is never treated as a fee. |
+| E-09 | **Negotiate** | A ₹3,500 product in exchange for content worth ₹60,000 at base rates. Gifting is not cash. |
+| E-10 | **Negotiate** | The fee meets the rate (USD 800 = ₹67,200 at the profile's rate of 84), but perpetual, all-media usage with whitelisting goes beyond the 3 months included. |
+| E-12 | **Decline** | Due 1 Nov. "Today" is the profile's date (12 Nov), not the machine clock. |
 | E-14 | **Scam** | `youtube-copyright-centre.net` is not a YouTube domain; "verify your account" link plus a suspension threat. |
-| E-15 | **Ask for details** | The brief is an attachment that isn't opened; no terms are invented. |
+| E-15 | **Ask for details** | The brief is in an attachment, which isn't opened. No terms are invented. |
 
 ## Evaluation
 
-I wrote expected answers by hand for all 15 emails ([evaluation/expected_results.json](evaluation/expected_results.json)), from the emails themselves rather than from system output. Each one covers:
-- the category;
-- the key fields: brand, fee, currency, payment type, deliverables, deadline, usage rights;
-- which emails form one deal, and the deal's latest terms;
-- the risks that must be flagged;
-- the next step.
-
-Fields that the email doesn't state are scored too, so a **made-up value** counts as an error. Run `python -m evaluation.evaluate` (rules) or `--ai` (live model).
+I wrote the expected answers for all 15 emails by hand, from the emails themselves rather than from system output ([evaluation/expected_results.json](evaluation/expected_results.json)). They cover the category, key fields, deal grouping and latest terms, required risks and the next step. Fields an email doesn't state are scored too, so a **made-up value** counts as an error.
 
 | Metric | Rules, first run | Rules, now | Groq, first run | Groq, now | Gemini (fallback) |
 |---|---|---|---|---|---|
@@ -148,124 +120,118 @@ Fields that the email doesn't state are scored too, so a **made-up value** count
 | Dew Lab deal's latest terms | 5/5 | 5/5 | 5/5 | 5/5 | 5/5 |
 | Made-up values | **1** | 0 | 0 | 0 | 0 |
 
-Both models ran live on 13 Nov 2026: Groq with `openai/gpt-oss-20b`, Gemini with `gemini-3.5-flash-lite`. Gemini was measured with Groq forced to fail, so Gemini answered all 12 non-scam emails; it was run once, with the deterministic floor already in place. Emails already flagged as scams are not sent to any model.
+The live runs were on 13 Nov 2026. For the Gemini column Groq was forced to fail, so Gemini answered all 12 non-scam emails.
 
-**What it got wrong, and the fixes:**
-1. **Rules, E-07:** the rule extractor read the injected "Rs 5,00,000" as a fee. Deal terms already excluded it; now an amount inside instructions aimed at an AI is never read as a fee.
-2. **Groq, E-15:** the model marked "please find our campaign brief attached" as *not a collaboration*, so a real lead became spam. In testing with other wording it also dropped a stated currency ("$1,000") and a whitelisting request. The fix is a **deterministic floor**: the model can add information, but it cannot drop a signal plain code reads directly from the email (collaboration language, explicit revision wording, a stated currency, usage/whitelisting terms). Each time this happens it is noted in the extraction.
+**What went wrong, and the fixes**
+1. **Rules, E-07:** the rules read the injected "Rs 5,00,000" as a fee. Now an amount inside instructions aimed at an AI is never treated as a fee.
+2. **Groq, E-15:** the model decided "please find our campaign brief attached" was not a collaboration, so a real lead became spam. With other wording it also dropped a stated currency and a whitelisting request. The deterministic floor (see Design) fixes this.
 
-**How far to trust these numbers.** 15 emails is a small set, and I wrote the expected answers after seeing the emails while building the system. So 15/15 shows the tricky cases are handled as intended, not that it will be 100% on new mail. Measuring that properly is the first item under "With another week".
+**How far to trust this.** 15 emails is a small set, and I wrote the answers after seeing them. 15/15 shows that the tricky cases work as intended, not that new mail will score 100%.
 
 ## Cost and time per email
 
-Measured on the 15-email inbox (live run, 13 Nov 2026):
+Measured on the 15-email inbox (13 Nov 2026):
 
-| | Rules | Groq `gpt-oss-20b` | Gemini `gemini-3.5-flash-lite` (fallback) |
+| | Rules | Groq `gpt-oss-20b` | Gemini `gemini-3.5-flash-lite` |
 |---|---|---|---|
-| Time | ~2 ms/email | **0.84 s** average per call | **1.9 s** average per call |
-| Tokens | 0 | **~1,480 input + ~250 output** per email | **~680 input + ~360 output** per email |
-| Cost | 0 | ≈ **$0.0002/email** at $0.075/M input and $0.30/M output (Developer plan prices) | not measured (Gemini pricing not checked) |
+| Time | ~2 ms per email | 0.84 s per call | 1.9 s per call |
+| Tokens per email | 0 | ~1,480 in + ~250 out | ~680 in + ~360 out |
+| Cost per email | 0 | ≈ $0.0002 (Developer plan: $0.075/M in, $0.30/M out) | not measured |
 
-The whole 15-email Groq run took 114 s, almost all of it pacing for the free tier's 8K tokens/min. The Gemini run took 24 s. Three detected scams were not sent to either model.
+The full Groq run took 114 s, mostly waiting to stay under the free tier's 8K tokens/min. The Gemini run took 24 s.
 
-**At 1,000 emails/day:**
-- **Cost:** about $0.19/day (~$6/month) on the Developer plan.
-- **Free tier won't do it:** at 8K tokens/min and 200K tokens/day it handles about 4–5 emails/min and roughly 115/day. The Developer plan (250K tokens/min) handles it easily.
-- **Fewer model calls:** the rules prefilter skips detected scams (3 of 15 here), and the content cache stops repeat calls.
-
-What I'd change for that volume:
-- a queue with one paced worker;
-- Postgres for emails, extractions and deal events, keyed by `Message-ID` so reruns are idempotent;
-- alerts on fallback rate, validation errors and spend;
-- Groq Batch for non-urgent backfills.
+**At 1,000 emails/day**
+- **Cost:** about $0.19/day (~$6/month) on Groq's Developer plan.
+- **Free tier:** too small; 8K tokens/min and 200K/day covers about 115 emails/day.
+- **Fewer calls:** detected scams (3 of 15 here) and cached emails never reach the model.
+- **What I'd add:**
+  - a paced worker queue;
+  - Postgres keyed by `Message-ID`, so reruns are idempotent;
+  - alerts on fallback rate and spend;
+  - Groq Batch for backfills.
 
 ## Limitations
 
-- **Rules extraction is heuristic.** Brand and campaign come from text patterns. Unusual wording falls back to null rather than a guess, but some will be missed. Groq covers this better.
-- **Documented assumptions, not facts:**
-  - INR for an amount with no currency (E-06), shown as an assumption;
-  - Instagram for reels/stories with no platform named;
-  - the year for dates without one, inferred from the email's received date.
-- **Keyword-based policy checks.** Synonym lists cover common phrasings ("fantasy cricket", "5G phone"), but negation is not understood: "we are not a betting app" would still trip the no-betting rule. New wording can slip through.
-- **Injection detection** is a short pattern list (it catches E-07's "Note to any AI assistant…" and "Classify this email as…") plus the model's own flag. A differently worded attack could evade both. Even then, the model cannot change the category, next step, rates or replies.
-- **Drafts** are English templates; a reply to a Hinglish email is still English. Attachments are never opened.
-- **Exclusivity matching** is by category keywords. It does not know every competitor brand by name.
+- **Rules extraction is heuristic.** When the wording is unusual it leaves a field empty rather than guessing, so some details are missed.
+- **Some values are assumed:**
+  - INR when an amount has no currency (E-06);
+  - Instagram when reels or stories name no platform;
+  - the year, from the received date, when a date has none.
+
+  Each assumption is shown in the output.
+- **Policy checks use keywords.** Synonyms are covered, but negation isn't: "we are not a betting app" still trips the no-betting rule.
+- **Injection detection** is a short pattern list plus the model's own flag, so new wording could slip through. Even then, the model can't change the category, next step, rates or replies.
+- **Drafts are English templates,** even for Hinglish emails. Attachments are never opened.
+- **Exclusivity is matched by category keywords,** not competitor brand names.
 
 ## With another week
 
-These are the improvements I would make next, in priority order. They are suggestions, not part of this submission.
+In priority order. These are suggestions, not part of this submission.
 
-**1. Know how good it is on real mail**
-- Write a held-out set of new emails *before* running the system on them (new phrasings, look-alike domains, agency follow-ups, Hinglish) and report the first, blind score.
-- Label 100+ real, anonymised creator emails with two independent reviewers, and measure agreement between them.
-- Evaluate Groq, Gemini and rules separately on that larger set, and run the evaluation in CI so a prompt or rule change can't silently lower accuracy.
-- Add per-field confidence, so low-confidence extractions are routed to review instead of acted on.
-
-**2. Connect to a real inbox and keep history**
-- Gmail/Outlook read-only import (OAuth) using real thread headers (`Message-ID`, `In-Reply-To`) for grouping.
-- PostgreSQL for emails, extractions and deal events, keyed by `Message-ID` so reruns are idempotent.
-- A queue with a paced worker for 1,000+ emails/day, plus alerts on fallback rate, validation errors and spend.
-- Package it as a Docker image for deployment, with a `.dockerignore` so `.env` and API keys never end up inside the image.
-
-**3. Turn the read-only dashboard into a review screen**
-- Let the creator edit a draft, mark it as sent, and correct a category or term directly in the dashboard.
-- Add login, so the dashboard can be hosted for a creator instead of only running on localhost.
-- Store the creator's edits and overrides as new labels for evaluation.
-
-**4. Better extraction and safety**
-- Read PDF/DOCX briefs (like E-15's attachment) in a sandbox instead of only asking for the details.
-- Stronger injection detection: more phrasings ("if you are an AI…", fake `System:` blocks, "ignore your instructions"), flag hidden text (HTML comments, zero-width characters), and a dedicated prompt-injection classifier as an extra signal.
-- Understand negation in content rules, so "we are not a betting app" is not treated as a betting app.
-- Recognise competitor brands by name, not only by category keywords, for exclusivity checks.
-- Use the Groq Batch API for non-urgent backfills to cut cost.
-
-**5. AI-written replies with plain-code guardrails**
-
-Today's drafts are deterministic templates: safe, but stiff, and always in English. The next step keeps the same safety:
-- **Plain code decides what the reply must say:** counter amount, usage terms, missing details, agency verification.
-- **Groq writes it** naturally, in the brand's language when the email is in Hindi or Hinglish.
-- **Pydantic validates the draft,** and a check rejects any draft that changes an amount, adds a commitment or drops a required point.
-- **The current template stays as the fallback** whenever the AI draft fails validation or the API is unavailable.
-
-**6. Creator-editable policy**
-- Turn the profile's free-text rules ("No crypto or trading-tip promotions") into structured settings the creator edits: blocked categories, minimum rates per deliverable, usage and whitelisting pricing, barter preferences. This removes the need to parse sentences.
+1. **Measure it on real mail.**
+   - A held-out set of emails written before running the system on them.
+   - 100+ labelled real emails, checked by two reviewers.
+   - Scores for each provider, run in CI.
+   - Confidence for each field, so unsure extractions go to review.
+2. **Real inbox and history.**
+   - Read-only Gmail/Outlook import, grouped by thread headers.
+   - Postgres keyed by `Message-ID`.
+   - A paced worker queue with alerts.
+   - A Docker image, with a `.dockerignore` so `.env` never ships.
+3. **Dashboard as a review screen.**
+   - Edit drafts and mark them as sent.
+   - Correct a category or term.
+   - Add login so it can be hosted.
+   - Save each correction as a new evaluation label.
+4. **Better extraction and safety.**
+   - Read PDF/DOCX briefs in a sandbox.
+   - Catch more injection wording and hidden text.
+   - Understand negation in content rules.
+   - Recognise competitor brands by name.
+   - Use Groq Batch for backfills.
+5. **AI-written replies with plain-code guardrails.**
+   - Code decides what the reply must say: counter amount, usage, missing details, agency check.
+   - Groq writes it naturally, in Hindi or Hinglish when the email is.
+   - A check rejects any draft that changes an amount, adds a commitment or drops a point.
+   - Today's template stays as the fallback.
+6. **Creator-editable policy.** Turn the profile's free-text rules into settings the creator edits: blocked categories, minimum rates, usage and whitelisting prices, barter preferences.
 
 ## Where AI coding tools were used
 
-- **ChatGPT** was used to plan the work and to generate the initial starter (the `Baseline starter` commit).
-- **Claude Code** (Anthropic) implemented Batches 1–5 in this repository:
-  - an audit of the starter;
-  - the Groq client and fallback;
+- **ChatGPT** planned the work and generated the initial starter (the `Baseline starter` commit).
+- **Claude Code** (Anthropic) did the rest in this repository:
+  - the starter audit;
+  - the Groq/Gemini client and fallback;
   - grouping, reconciliation and policy checks;
   - draft replies;
   - the evaluation harness;
   - the Streamlit dashboard;
-  - tests and this README draft.
-- It ran the test suite, the pipeline and the evaluation after each change.
-- The model choice was checked against Groq's live documentation.
+  - the tests and this README draft.
 
-All numbers in this README come from commands run in this repository, and first-run results are reported as they were.
+  It ran the tests, pipeline and evaluation after each change, and checked the model choice against Groq's live docs.
+
+All numbers here come from commands run in this repository. First-run results are reported as they were.
 
 ## Project layout
 
 ```
-dashboard.py             Streamlit dashboard (localhost:8501), read-only layout and state
-ui/                      dashboard components (components.py) and design tokens (theme.css)
+dashboard.py             Streamlit dashboard (localhost:8501)
+ui/                      dashboard components (components.py) and styles (theme.css)
 .streamlit/config.toml   dashboard settings: localhost only, no usage statistics
 app/
   main.py                CLI (--no-ai, --check-ai)
   pipeline.py            orchestration; writes all outputs
-  core/config.py         settings from env/.env (key is a SecretStr)
+  core/config.py         settings from env/.env (keys are SecretStr)
   models/schemas.py      Pydantic models: email, extraction, terms, risks, deals, drafts
   services/
     ai_extractor.py      Groq -> Gemini chain, strict schema, grounding, pacing, cache, rules fallback
     rule_classifier.py   rules extraction, security signals, category decision
     deal_grouper.py      thread/subject/brand+campaign grouping with evidence
-    term_reconciler.py   latest-terms-by-timestamp with full history
+    term_reconciler.py   latest terms by timestamp, with full history
     risk_analyzer.py     creator-policy checks, rate maths, risks
-    recommendation.py    next action, summary.md, drafts.md
+    recommendation.py    next step, summary.md, drafts.md
     reply_generator.py   draft replies (never sent)
   utils/helpers.py       money (lakh/k), dates, domains, sentences
 evaluation/              expected answers for the 15 emails, evaluate.py
-tests/                   119 offline tests (including a click-through of every dashboard view)
+tests/                   119 offline tests, including a click-through of the dashboard
 ```
